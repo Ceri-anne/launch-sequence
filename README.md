@@ -55,6 +55,17 @@ To have release notes translated, set `ANTHROPIC_API_KEY`. Without it, the other
 
 ## Setting up an app
 
+With [Claude Code](https://claude.com/claude-code), the `setup-launchseq` skill walks through the steps below. It also covers the choices they leave open: which languages to list, which simulator to pin, and where the website pages and listing text get edited from now on. Install it once:
+
+```bash
+claude plugin marketplace add Ceri-anne/launch-sequence
+claude plugin install launchseq@launch-sequence
+```
+
+Then, in the app's repo, ask Claude to set it up with launchseq.
+
+By hand:
+
 1. Run `launchseq init` in the app's repo. It drafts `.launchseq.yml` from the project (or XcodeGen's `project.yml`), the file holding `MARKETING_VERSION`, the bundle ID and the newest iPhone Pro simulator, and lists anything it had to guess. Add your languages, and the optional sections you use. [`examples/launchseq.yml`](examples/launchseq.yml) is a complete config to copy from. `launchseq init --dry-run` prints the draft without writing it.
 2. Move the App Store copy into `<metadata_dir>/<asc-locale>/`, one file per field:
 
