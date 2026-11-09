@@ -35,7 +35,7 @@ struct LaunchSeq: AsyncParsableCommand {
           liftoff    CI gate, tag, website pages, App Store Connect (stops before Submit for Review)
         """,
         version: "0.1.0",
-        subcommands: [CountdownCommand.self, LiftoffCommand.self, DoctorCommand.self, MigrateCopyCommand.self]
+        subcommands: [CountdownCommand.self, LiftoffCommand.self, DoctorCommand.self, InitCommand.self, MigrateCopyCommand.self]
     )
 
     static func main() async {
@@ -166,5 +166,28 @@ struct MigrateCopyCommand: AsyncParsableCommand {
         } else {
             ctx.console.stage("Wrote \(files). Run `launchseq doctor` to check them.")
         }
+    }
+}
+
+struct InitCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "init",
+        abstract: "Draft a .launchseq.yml from the project, its version file and the installed simulators."
+    )
+
+    @Flag(name: .long, help: "Print the draft instead of writing it.")
+    var dryRun = false
+
+    @Flag(name: [.short, .long], help: "Print every command run.")
+    var verbose = false
+
+    @Flag(help: "Replace an existing .launchseq.yml.")
+    var force = false
+
+    func run() async throws {
+        let root = try Init.repoRoot()
+        let console = Console(verbose: verbose)
+        let shell = Shell(runner: ProcessRunner(), console: console, dryRun: dryRun, root: root)
+        try Init(root: root, shell: shell, console: console).run(force: force)
     }
 }

@@ -152,7 +152,10 @@ public struct AppSection: Codable, Sendable, Equatable {
         try SafePath.checkRelative(project, field: "app.project")
     }
 
-    public var slug: String {
+    public var slug: String { Self.slug(for: name) }
+
+    /// "Prime Time" → "prime-time".
+    public static func slug(for name: String) -> String {
         name.lowercased().replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
