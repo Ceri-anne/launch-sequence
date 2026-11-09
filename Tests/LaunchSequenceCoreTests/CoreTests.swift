@@ -191,6 +191,28 @@ struct MetadataTests {
         #expect(MarkdownCopy.parse(english, defaultLanguage: "en") == ["en": [.name: "Prime Time: Is it Prime?", .promotionalText: "A number flashes on screen."]])
         #expect(MarkdownCopy.parse(localized, defaultLanguage: nil) == ["en": [.releaseNotes: "- Settings"], "fr": [.subtitle: "Premier ou pas ?"]])
     }
+
+    func migrateCopy(dryRun: Bool) throws -> (root: URL, written: [String]) {
+        let root = try tempDir()
+        try write(root, ["Copy.md": "## App Name (max 30)\n```\nPrime Time\n```\n"])
+        let ctx = Context(config: try Config.parse(try fixture("launchseq.yml")), root: root,
+                          console: Console(answers: [], sink: { _ in }), dryRun: dryRun)
+        let written = try MigrateCopy(ctx: ctx).run(sources: [.init(path: "Copy.md", defaultLanguage: "en")],
+                                                    urls: [.supportURL: "https://example.com/support"], overwrite: false)
+        return (root, written)
+    }
+
+    @Test func migrateCopyWritesFiles() throws {
+        let (root, written) = try migrateCopy(dryRun: false)
+        #expect(written == ["AppStoreAssets/metadata/en-GB/name.txt", "AppStoreAssets/metadata/support_url.txt"])
+        #expect(try String(contentsOf: root.appendingPathComponent("AppStoreAssets/metadata/en-GB/name.txt"), encoding: .utf8) == "Prime Time\n")
+    }
+
+    @Test func migrateCopyDryRunWritesNothing() throws {
+        let (root, written) = try migrateCopy(dryRun: true)
+        #expect(written == ["AppStoreAssets/metadata/en-GB/name.txt", "AppStoreAssets/metadata/support_url.txt"])
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("AppStoreAssets").path))
+    }
 }
 
 @Suite("Release notes")
