@@ -134,7 +134,7 @@ public struct Config: Codable, Sendable, Equatable {
 // MARK: - Sections
 
 public struct AppSection: Codable, Sendable, Equatable {
-    /// Human name, used in messages and branch names (e.g. "Prime Time").
+    /// Human name, used in messages and branch names (e.g. "Star Chart").
     public var name: String
     /// Optional command run before any xcodebuild call, e.g. `[xcodegen, generate]`.
     public var generate: [String]?
@@ -154,7 +154,7 @@ public struct AppSection: Codable, Sendable, Equatable {
 
     public var slug: String { Self.slug(for: name) }
 
-    /// "Prime Time" → "prime-time".
+    /// "Star Chart" → "star-chart".
     public static func slug(for name: String) -> String {
         name.lowercased().replacingOccurrences(of: #"[^a-z0-9]+"#, with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
@@ -418,7 +418,7 @@ public struct WebsiteSection: Codable, Sendable, Equatable {
     /// GitHub repo, owner/name.
     public var repo: String
     public var branch: String
-    /// Folder in the website repo the pages go into, e.g. "prime-time".
+    /// Folder in the website repo the pages go into, e.g. "star-chart".
     public var folder: String
     /// Folder in the app repo the pages are authored in, e.g. "website".
     public var source: String

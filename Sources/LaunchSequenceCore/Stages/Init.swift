@@ -197,7 +197,7 @@ public enum InitDraft {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    /// "PrimeTime" → "Prime Time".
+    /// "StarChart" → "Star Chart".
     static func spacedWords(_ s: String) -> String {
         s.replacingOccurrences(of: #"([a-z0-9])([A-Z])"#, with: "$1 $2", options: .regularExpression)
     }
