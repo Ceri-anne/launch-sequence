@@ -1,0 +1,16 @@
+{
+  "name": "launch-sequence",
+  "owner": {
+    "name": "Ceri-anne Jackson"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for setting up iOS app repos with launchseq."
+  },
+  "plugins": [
+    {
+      "name": "launchseq",
+      "source": "./plugin",
+      "description": "Set up an iOS app repo to release with launchseq."
+    }
+  ]
+}
