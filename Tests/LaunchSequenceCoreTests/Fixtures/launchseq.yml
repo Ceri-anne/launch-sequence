@@ -1,0 +1,35 @@
+app:
+  name: Prime Time
+  project: PrimeTime.xcodeproj
+  generate: [xcodegen, generate]
+test:
+  scheme: PrimeTime
+  simulator: { name: iPhone 17 Pro, os: "27.2" }
+languages:
+  - { code: en, locale: en_GB, asc_locale: en-GB }
+  - { code: fr, locale: fr_FR, asc_locale: fr-FR }
+  - { code: cy, locale: cy_GB }  # no App Store listing language
+screenshots:
+  raw_dir: AppStoreAssets/Screenshots/Raw
+  output_dir: AppStoreAssets/Screenshots/AppStore
+  render: [node, scripts/render.js]
+  builds:
+    - scheme: PrimeTime
+      simulator: { name: iPhone 17 Pro, os: "27.2" }
+  scenes:
+    - { name: 01-decide, args: [-screenshotScene, "asking:31:4"] }
+  devices:
+    - name: iPhone
+      simulator: { name: iPhone 17 Pro, os: "27.2" }
+      app: Debug-iphonesimulator/PrimeTime.app
+      bundle_id: uk.co.example.primetime
+      display_type: APP_IPHONE_61
+app_store:
+  bundle_id: uk.co.example.primetime
+  primary_locale: en-GB
+release_notes:
+  ignore: ["AGENTS"]
+website:
+  repo: Example/example.github.io
+  folder: prime-time
+privacy_sensitive_paths: ["Sources/Services/**"]

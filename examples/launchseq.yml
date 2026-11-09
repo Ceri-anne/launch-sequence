@@ -1,0 +1,104 @@
+# Example .launchseq.yml: the real config for Prime Time, an iPhone + Apple Watch game
+# with an iPhone Duo listing. Copy it to your app repo root as .launchseq.yml.
+
+app:
+  name: Prime Time
+  project: PrimeTime.xcodeproj
+  generate: [xcodegen, generate]   # the .xcodeproj is gitignored and generated from project.yml
+
+version:
+  file: project.yml
+  key: MARKETING_VERSION           # set on both the iOS and Watch targets; both are rewritten
+
+test:
+  scheme: PrimeTime
+  # Snapshot references are 3x iPhone 17 Pro renders. Xcode Cloud pins iOS 27.2; this Mac
+  # has no 27.2 runtime, and the references also pass on 27.0 (see AGENTS.md).
+  simulator: { name: iPhone 17 Pro, os: "27.0" }
+
+languages:
+  - { code: en, locale: en_GB, asc_locale: en-GB }
+  - { code: fr, locale: fr_FR, asc_locale: fr-FR }
+  - { code: de, locale: de_DE, asc_locale: de-DE }
+  - { code: es, locale: es_ES, asc_locale: es-ES }
+  - { code: cy, locale: cy_GB }    # shipped in the app, but App Store Connect has no Welsh listing
+  - { code: it, locale: it_IT, asc_locale: it }
+  - { code: pt-BR, locale: pt_BR, asc_locale: pt-BR }
+
+screenshots:
+  raw_dir: AppStoreAssets/Screenshots/Raw
+  output_dir: AppStoreAssets/Screenshots/AppStore
+  # Frames Raw/<lang>/<device>/ into AppStore/<lang>/<device>/. Needs Playwright once:
+  #   npm install --no-save playwright && npx playwright install chromium
+  render: [node, scripts/render_store_screenshots.js]
+  # Debug builds: Release compiles out the -screenshotScene hook.
+  builds:
+    - scheme: PrimeTime
+      simulator: { name: iPhone 17 Pro, os: "27.0" }
+    - scheme: PrimeTimeWatch
+      simulator: { name: Apple Watch Ultra 4 (49mm), os: "27.0", platform: watchOS }
+  scenes:   # Sources/Services/ScreenshotScene.swift
+    - { name: 01-decide, args: [-screenshotScene, "asking:31:4"] }
+    - { name: 02-discover, args: [-screenshotScene, "correct:31:5"] }
+    - { name: 03-streak, args: [-screenshotScene, "gameover:5"] }
+  devices:
+    - name: iPhone
+      simulator: { name: iPhone 17 Pro, os: "27.0" }
+      app: Debug-iphonesimulator/PrimeTime.app
+      bundle_id: uk.co.ceri-anne.primetime
+      display_type: APP_IPHONE_61
+      status_bar: [--time, "9:41", --dataNetwork, wifi, --wifiBars, "3", --cellularMode, active, --cellularBars, "4", --batteryState, charged, --batteryLevel, "100"]
+    - name: Watch
+      simulator: { name: Apple Watch Ultra 4 (49mm), os: "27.0", platform: watchOS }
+      app: Debug-watchsimulator/PrimeTimeWatch.app
+      bundle_id: uk.co.ceri-anne.primetime.watchkitapp
+      display_type: APP_WATCH_ULTRA
+    # iPhone Duo: simctl can't change the fold state, so launchseq waits while you do it in
+    # Device Hub. Both passes fill the one iPhone Duo slot, unfolded (inner) first, matching the live listing.
+    - name: iPhoneDuo-inner
+      simulator: { name: iPhone Duo, os: "27.1" }
+      app: Debug-iphonesimulator/PrimeTime.app
+      bundle_id: uk.co.ceri-anne.primetime
+      display_type: APP_IPHONE_DUO
+      sizes: [[2853, 2007]]
+      display: LCD-1
+      before: Unfold the iPhone Duo simulator in Device Hub (inner display).
+      languages: [en, fr, de, es, it, pt-BR]
+      settle_seconds: 6
+      warmup_seconds: 8
+    - name: iPhoneDuo-outer
+      simulator: { name: iPhone Duo, os: "27.1" }
+      app: Debug-iphonesimulator/PrimeTime.app
+      bundle_id: uk.co.ceri-anne.primetime
+      display_type: APP_IPHONE_DUO
+      sizes: [[1398, 2034]]
+      display: LCD
+      before: Fold the iPhone Duo simulator in Device Hub (outer display).
+      languages: [en, fr, de, es, it, pt-BR]
+      settle_seconds: 6
+      warmup_seconds: 8   # the Duo launches slowly; without a warm-up the first capture is the launch screen
+
+app_store:
+  bundle_id: uk.co.ceri-anne.primetime
+  app_id: "6824572081"
+  primary_locale: en-GB
+  metadata_dir: AppStoreAssets/metadata
+  release_type: MANUAL
+  phased_release: true
+
+release_notes:
+  # Commit subjects matching these are left out of the English draft.
+  ignore: ["AGENTS\\.md", "snapshot", "Xcode Cloud", "CI\\b", "^Keep the .* test", "launchseq", "DEBUG-only"]
+
+website:
+  repo: Ceri-anne/ceri-anne.github.io
+  branch: main
+  folder: prime-time
+  source: website
+
+# Changes here can affect what the privacy, support or accessibility pages should say.
+privacy_sensitive_paths:
+  - "Sources/Services/**"
+  - "**/*.entitlements"
+  - "Sources/Info.plist"
+  - "WatchSources/**"
