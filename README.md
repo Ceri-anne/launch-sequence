@@ -23,8 +23,10 @@ Each app describes itself in a `.launchseq.yml`. There's nothing app-specific in
 git clone https://github.com/Ceri-anne/launch-sequence.git
 cd launch-sequence
 swift build -c release
-cp .build/release/launchseq ~/bin/   # or anywhere on your PATH
+cp .build/release/launchseq /usr/local/bin/
 ```
+
+Any folder on your `PATH` works. Check with `echo $PATH`: a fresh Mac often has no `~/bin`, `/usr/local/bin` may need `sudo` or not exist yet, and on Apple silicon with Homebrew, `/opt/homebrew/bin` is already on it and yours to write to. Run `launchseq --version` to confirm.
 
 You'll need Xcode, `git`, and the [GitHub CLI](https://cli.github.com) signed in (`gh auth login`).
 
@@ -53,7 +55,7 @@ To have release notes translated, set `ANTHROPIC_API_KEY`. Without it, the other
 
 ## Setting up an app
 
-1. Add `.launchseq.yml` to the repo root (see [`examples/launchseq.yml`](examples/launchseq.yml)).
+1. Run `launchseq init` in the app's repo. It drafts `.launchseq.yml` from the project (or XcodeGen's `project.yml`), the file holding `MARKETING_VERSION`, the bundle ID and the newest iPhone Pro simulator, and lists anything it had to guess. Add your languages, and the optional sections you use. [`examples/launchseq.yml`](examples/launchseq.yml) is a complete config to copy from. `launchseq init --dry-run` prints the draft without writing it.
 2. Move the App Store copy into `<metadata_dir>/<asc-locale>/`, one file per field:
 
    ```text
