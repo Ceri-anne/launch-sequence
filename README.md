@@ -19,14 +19,24 @@ Each app describes itself in a `.launchseq.yml`. There's nothing app-specific in
 
 ## Install
 
+Install a tagged [release](https://github.com/Ceri-anne/launch-sequence/releases), not `main`. `launchseq` pushes tags and edits your App Store Connect versions, so pin a version you've read the notes for. The examples below use `0.1.0`; swap in the latest release.
+
 ```bash
-git clone https://github.com/Ceri-anne/launch-sequence.git
+git clone --branch 0.1.0 --depth 1 https://github.com/Ceri-anne/launch-sequence.git
 cd launch-sequence
 swift build -c release
 cp .build/release/launchseq /usr/local/bin/
 ```
 
 Any folder on your `PATH` works. Check with `echo $PATH`: a fresh Mac often has no `~/bin`, `/usr/local/bin` may need `sudo` or not exist yet, and on Apple silicon with Homebrew, `/opt/homebrew/bin` is already on it and yours to write to. Run `launchseq --version` to confirm.
+
+If you use [Mint](https://github.com/yonaskolb/Mint), it does the same build for you:
+
+```bash
+mint install Ceri-anne/launch-sequence@0.1.0
+```
+
+To upgrade, read the new release's notes, then repeat either install with the new tag.
 
 You'll need Xcode, `git`, and the [GitHub CLI](https://cli.github.com) signed in (`gh auth login`).
 
