@@ -160,6 +160,11 @@ struct MigrateCopyCommand: AsyncParsableCommand {
         if let marketingUrl { urls[.marketingURL] = marketingUrl }
         if let privacyUrl { urls[.privacyURL] = privacyUrl }
         let written = try MigrateCopy(ctx: ctx).run(sources: sources, urls: urls, overwrite: overwrite)
-        ctx.console.stage("Wrote \(written.count) file\(written.count == 1 ? "" : "s"). Run `launchseq doctor` to check them.")
+        let files = "\(written.count) file\(written.count == 1 ? "" : "s")"
+        if ctx.dryRun {
+            ctx.console.stage("Would write \(files). Nothing was changed.")
+        } else {
+            ctx.console.stage("Wrote \(files). Run `launchseq doctor` to check them.")
+        }
     }
 }

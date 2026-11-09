@@ -31,9 +31,10 @@ public struct MigrateCopy: Sendable {
                 ctx.console.warn("\(relative) exists, left alone (pass --overwrite to replace it)")
                 return
             }
+            written.append(relative)
+            if ctx.dryRun { ctx.console.dry("write \(relative)"); return }
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try (text + "\n").write(to: url, atomically: true, encoding: .utf8)
-            written.append(relative)
         }
 
         for (code, fields) in merged.sorted(by: { $0.key < $1.key }) {
