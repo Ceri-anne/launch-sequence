@@ -26,24 +26,24 @@ struct InitTests {
     """
 
     let projectYML = """
-    name: PrimeTime
+    name: StarChart
     targets:
-      PrimeTime:
+      StarChart:
         info:
           properties:
-            CFBundleDisplayName: Prime Time
+            CFBundleDisplayName: Star Chart
         settings:
           base:
-            PRODUCT_BUNDLE_IDENTIFIER: uk.co.ceri-anne.primetime
+            PRODUCT_BUNDLE_IDENTIFIER: com.example.starchart
             MARKETING_VERSION: "1.2"
-      PrimeTimeTests:
+      StarChartTests:
         settings:
           base:
-            PRODUCT_BUNDLE_IDENTIFIER: uk.co.ceri-anne.primetimeTests
-      PrimeTimeWatch:
+            PRODUCT_BUNDLE_IDENTIFIER: com.example.starchartTests
+      StarChartWatch:
         settings:
           base:
-            PRODUCT_BUNDLE_IDENTIFIER: uk.co.ceri-anne.primetime.watchkitapp
+            PRODUCT_BUNDLE_IDENTIFIER: com.example.starchart.watchkitapp
             MARKETING_VERSION: "1.2"
     """
 
@@ -60,14 +60,14 @@ struct InitTests {
 
     @Test func readsAnXcodeGenRepo() throws {
         let facts = try InitDraft.facts(files: ["project.yml", "Sources"], read: { $0 == "project.yml" ? projectYML : nil },
-                                        schemes: nil, simulators: Data(simulators.utf8), remoteURL: "git@github.com:Ceri-anne/PrimeTime.git")
-        #expect(facts.appName == "Prime Time")
-        #expect(facts.project == "PrimeTime.xcodeproj")
+                                        schemes: nil, simulators: Data(simulators.utf8), remoteURL: "git@github.com:example-owner/StarChart.git")
+        #expect(facts.appName == "Star Chart")
+        #expect(facts.project == "StarChart.xcodeproj")
         #expect(facts.generate == ["xcodegen", "generate"])
         #expect(facts.versionFile == "project.yml")
-        #expect(facts.bundleId == "uk.co.ceri-anne.primetime")
-        #expect(facts.scheme == "PrimeTime")
-        #expect(facts.githubOwner == "Ceri-anne")
+        #expect(facts.bundleId == "com.example.starchart")
+        #expect(facts.scheme == "StarChart")
+        #expect(facts.githubOwner == "example-owner")
         #expect(facts.notes.count == 1)   // the scheme was guessed
     }
 
