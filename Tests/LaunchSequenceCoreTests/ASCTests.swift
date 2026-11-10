@@ -47,6 +47,7 @@ final class FakeASC: @unchecked Sendable {
             let id = "shot\(nextID)"
             let body = try JSONValue.parse(r.httpBody!)
             screenshots[id] = ["id": .string(id), "attributes": ["fileName": body["data"]["attributes"]["fileName"], "assetDeliveryState": ["state": "UPLOAD_COMPLETE"]]]
+            setOrder.append(id)  // a reserved screenshot joins its set straight away
             let size = body["data"]["attributes"]["fileSize"].int!
             return try doc(["data": ["id": .string(id), "attributes": ["uploadOperations": [["method": "PUT", "url": .string("https://store-1.blobstore.apple.com/\(id)"), "offset": 0, "length": .number(Double(size)), "requestHeaders": [["name": "Content-Type", "value": "image/png"]]]]]]])
         case ("PATCH", let p) where p.hasPrefix("/v1/appScreenshots/"):
@@ -104,7 +105,7 @@ struct ASCTests {
         #expect(transport.requests[before...].allSatisfy { $0.httpMethod == "GET" })
 
         let changed = [files[0], AppStoreConnect.LocalScreenshot(fileName: "02.png", data: Data("TWO".utf8))]
-        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: changed) == .replaced(2))
+        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: changed) == .replaced(1))  // the first is kept
         #expect(fake.screenshots.count == 2)
     }
 
@@ -120,10 +121,52 @@ struct ASCTests {
             .syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files, label: "en-GB APP_IPHONE_61")
 
         #expect(result == .replaced(4))
-        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: uploading 4 screenshots") })
-        #expect(lines.all.contains { $0.contains("… en-GB APP_IPHONE_61: 0/4 processed by Apple (0s)") })
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: uploading 4 screenshots one at a time") })
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: 3/4 03.png") })
+        #expect(lines.all.contains { $0.contains("… en-GB APP_IPHONE_61 03.png: 0/1 processed by Apple (0s)") })
         #expect(lines.all.contains { $0.contains("(30s)") })
-        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: all 4 processed (2m 30s)") })
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61 04.png: processed (2m 30s)") })
+    }
+
+    @Test func eachScreenshotIsProcessedBeforeTheNextIsUploaded() async throws {
+        let fake = FakeASC()
+        fake.processingPolls = 2
+        let transport = RecordingTransport { try fake.handle($0) }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        let files = (1...3).map { AppStoreConnect.LocalScreenshot(fileName: "0\($0).png", data: Data("\($0)".utf8)) }
+        _ = try await AppStoreConnect(client: client, console: quietConsole).syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files)
+
+        // Reserve 1, poll 1 until done, reserve 2, poll 2, … never reserving while one is processing.
+        let steps = transport.requests.filter { $0.url!.host == HostPolicy.ascHost }.compactMap { r -> String? in
+            let path = r.url!.path
+            if r.httpMethod == "POST" && path == "/v1/appScreenshots" { return "reserve" }
+            if r.httpMethod == "GET" && path.hasPrefix("/v1/appScreenshots/") { return "poll " + path.dropFirst("/v1/appScreenshots/".count) }
+            return nil
+        }
+        #expect(steps == ["reserve", "poll shot1", "poll shot1", "poll shot1",
+                          "reserve", "poll shot2", "poll shot2", "poll shot2",
+                          "reserve", "poll shot3", "poll shot3", "poll shot3"])
+        #expect(fake.setOrder == ["shot1", "shot2", "shot3"])
+    }
+
+    @Test func aRerunKeepsTheScreenshotsThatAreAlreadyRight() async throws {
+        let fake = FakeASC()
+        let transport = RecordingTransport { try fake.handle($0) }
+        let lines = LineSink()
+        let console = Console(answers: [], sink: { lines.append($0) })
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: console, dryRun: false, sleep: { _ in })
+        let asc = AppStoreConnect(client: client, console: console)
+        var files = (1...4).map { AppStoreConnect.LocalScreenshot(fileName: "0\($0).png", data: Data("\($0)".utf8)) }
+        _ = try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files)
+
+        files[2] = .init(fileName: "03.png", data: Data("three, reframed".utf8))
+        let before = transport.requests.count
+        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files, label: "en-GB APP_IPHONE_61") == .replaced(2))
+        let rerun = transport.requests[before...]
+        #expect(rerun.filter { $0.httpMethod == "POST" && $0.url!.path == "/v1/appScreenshots" }.count == 2)
+        #expect(rerun.filter { $0.httpMethod == "DELETE" }.map { $0.url!.path } == ["/v1/appScreenshots/shot3", "/v1/appScreenshots/shot4"])
+        #expect(fake.setOrder == ["shot1", "shot2", "shot5", "shot6"])
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: uploading 2 screenshots one at a time (the first 2 are already there)") })
     }
 
     @Test func processingTimeoutSaysWhatIsLeftAndHowToResume() async throws {
@@ -134,7 +177,7 @@ struct ASCTests {
             try await AppStoreConnect(client: client, console: quietConsole)
                 .syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: [.init(fileName: "a.png", data: Data("x".utf8))], label: "fr-FR APP_IPHONE_61")
         } throws: { error in
-            "\(error)".contains("fr-FR APP_IPHONE_61: 1 of 1 screenshots still processing after 30 minutes")
+            "\(error)".contains("fr-FR APP_IPHONE_61 a.png: 1 of 1 screenshot still processing after 30 minutes")
         }
     }
 
