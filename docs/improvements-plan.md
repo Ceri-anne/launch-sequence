@@ -8,13 +8,14 @@ Suggested order: **1 → 2 → 4 → 3 → 5 → 8 → 6 → 7**. PRs 2 and 4 ca
 
 **Problem:** liftoff failed twice with "Screenshot still processing after 5 minutes". Apple took about 10–15 minutes per set.
 
-**Status:** done on branch `screenshot-processing-progress` (`206881e`). Not merged or released yet.
+**Status:** released in 0.2.0.
 
 - `waitForScreenshots` waits up to 30 minutes and prints `x/y processed by Apple (<elapsed>)` every 30 seconds.
 - On a timeout it says how many screenshots are still processing, and that rerunning liftoff skips the sets that have finished.
-- Left to do: open the PR, merge it, then tag a release so Homebrew picks it up.
 
 ## 2. Progress output and prompts
+
+**Status:** released in 0.2.0.
 
 **Problem:** long steps ran with no output, so it was unclear whether launchseq was working or stuck.
 
@@ -24,11 +25,15 @@ Suggested order: **1 → 2 → 4 → 3 → 5 → 8 → 6 → 7**. PRs 2 and 4 ca
 
 ## 3. Resuming and reruns (countdown)
 
+**Status:** released in 0.2.0.
+
 - **Rerunning after a failure.** If a step fails after countdown's own captures are written (Playwright was missing this time), a rerun refuses with "working tree isn't clean". Allow uncommitted changes when they're all in the paths countdown generates (screenshots, release notes) and the saved run state matches this run. Keep refusing for any other change.
 - **Stale framed screenshots.** With `--skip-screenshots`, re-render whenever the raw captures are newer than the framed images. Without this, the framed images were stale even though the raw captures were up to date.
 - **Release-branch history.** Always start `release/<version>` from `origin/main`, and never amend a commit countdown didn't make. One run made a branch whose first commit was an amended copy of a commit already on `main`.
 
 ## 4. CI checks (liftoff)
+
+**Status:** released in 0.2.0.
 
 - **No checks yet.** When `Git.checks` finds no check runs for the commit, keep polling for a few minutes (with progress) instead of failing straight away.
 - **Main workflow didn't run.** Xcode Cloud's Main workflow didn't trigger on the rebase-and-merge push, so liftoff kept reporting "No CI checks". If no build has started, offer to start one through the App Store Connect API (`POST ciBuildRuns` for the Main workflow on `refs/heads/main`), then wait for its checks.
@@ -56,6 +61,8 @@ Suggested order: **1 → 2 → 4 → 3 → 5 → 8 → 6 → 7**. PRs 2 and 4 ca
 - Test: the override arguments are built per device, and a Watch entry uses its own `status_bar` when one is set.
 
 ## 8. Replace only the screenshots that changed
+
+**Status:** partly released in 0.2.0. Liftoff now uploads screenshots one at a time and, on a rerun, keeps the ones at the start of a set that already match. `upload: manual` (or `--manual-screenshots`) lets you drag sets in by hand. Full per-image matching and `--skip-screenshots` are still to do.
 
 **Problem:** `syncScreenshots` is all-or-nothing per set. If anything differs, it deletes the whole set and uploads every screenshot again, so adding one screenshot uploads four, and one failed image re-uploads the rest.
 

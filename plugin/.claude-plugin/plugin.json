@@ -1,7 +1,7 @@
 {
   "name": "launchseq",
   "description": "Set up an iOS app repo to release with launchseq.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "repository": "https://github.com/Ceri-anne/launch-sequence",
   "author": {
     "name": "Ceri-anne Jackson"

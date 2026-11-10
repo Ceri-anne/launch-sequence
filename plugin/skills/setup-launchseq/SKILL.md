@@ -29,6 +29,7 @@ Run `launchseq init --dry-run`, read the draft and its warnings, then run `launc
 - **test.scheme**: confirm it against `xcodebuild -list` when init had to guess.
 - **screenshots**: fill this in only if the app can already open on a fixed screen from a launch argument. If there's a capture script, copy its scenes, devices, status bar settings and per-device language subsets into this section. If there isn't, leave the section out and say so in the hand-off. Adding a screenshot hook to the app is a separate change.
 - **website**: fill this in if the support, privacy or accessibility pages are on a site launchseq can open PRs against.
+- **app_store.ci_workflow**: the Xcode Cloud workflow that builds `main` and reports checks to GitHub. Liftoff offers to start it when no checks report on the release commit. Set it if the workflow isn't called `Main`.
 - **privacy_sensitive_paths**: the code that decides what data the app stores, syncs or sends, plus entitlements and `Info.plist`.
 
 **Done when** `launchseq doctor --offline` has no config errors. Missing copy is fine at this point, because that's step 3.
