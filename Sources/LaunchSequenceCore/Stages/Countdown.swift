@@ -169,6 +169,7 @@ public struct Countdown: Sendable {
 
     func generateProject() throws {
         guard let generate = config.app.generate, !generate.isEmpty else { return }
+        console.step("Generating the project with \(Shell.display(generate))")
         try ctx.shell.change(generate, mode: .log(ctx.root.appendingPathComponent("build/launchseq/logs/generate.log")))
     }
 
@@ -230,7 +231,10 @@ public struct Countdown: Sendable {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let translator {
                 let tone = try Metadata.read(ctx.root.appendingPathComponent(LocaleMetadata.path(metadataDir: config.appStore.metadataDir, locale: locale, field: .description)))
-                let translated = try await translator.translate(english, to: locale, toneReference: tone, limit: LocaleMetadata.Field.releaseNotes.limit!)
+                console.step("\(locale): translating the release notes…")
+                let translated = try await console.whileWorking("translating into \(locale)") {
+                    try await translator.translate(english, to: locale, toneReference: tone, limit: LocaleMetadata.Field.releaseNotes.limit!)
+                }
                 try (translated + "\n").write(to: url, atomically: true, encoding: .utf8)
                 console.ok("\(locale): translated")
             } else {
@@ -254,6 +258,11 @@ public struct Countdown: Sendable {
     func edit(_ file: URL) throws {
         let editor = ProcessInfo.processInfo.environment["VISUAL"] ?? ProcessInfo.processInfo.environment["EDITOR"] ?? "vi"
         let parts = editor.split(separator: " ").map(String.init)
+        guard ForegroundSpawn.ownsTerminal else {
+            // Without the terminal's foreground, an editor here would be stopped before it appears.
+            try console.pause("Edit the release notes draft in your own editor:\n     \(file.path)", acknowledgement: "Got it, reading the release notes…")
+            return
+        }
         console.step("Opening the draft in \(parts[0]). Save and close it to carry on.")
         let result = try ctx.shell.runner.run(parts + [file.path], cwd: ctx.root, environment: [:], mode: .interactive)
         guard result.status == 0 else { throw LaunchError.aborted("the editor exited with \(result.status)") }
