@@ -185,7 +185,8 @@ public struct AppStoreConnect: Sendable {
 
     /// Makes the set for one localization × display type match `files` exactly, in order.
     /// If it already matches (same file names and checksums, all processed), nothing changes.
-    public func syncScreenshots(localizationID: String, displayType: String, files: [LocalScreenshot]) async throws -> ScreenshotResult {
+    public func syncScreenshots(localizationID: String, displayType: String, files: [LocalScreenshot], label: String? = nil) async throws -> ScreenshotResult {
+        let label = label ?? displayType
         let sets = try await client.getAll("/v1/appStoreVersionLocalizations/\(localizationID)/appScreenshotSets")
         var setID = sets.first(where: { $0["attributes"]["screenshotDisplayType"].string == displayType })?["id"].string
         if let setID {
@@ -210,6 +211,7 @@ public struct AppStoreConnect: Sendable {
         guard let setID else { throw LaunchError.api("No screenshot set ID for \(displayType)") }
 
         var uploadedIDs: [String] = []
+        console.step("\(label): uploading \(files.count) screenshot\(files.count == 1 ? "" : "s")")
         for file in files {
             let reserved = try await client.post("/v1/appScreenshots", [
                 "data": [
@@ -227,27 +229,51 @@ public struct AppStoreConnect: Sendable {
             ])
             uploadedIDs.append(shotID)
         }
-        if !client.dryRun { try await waitForScreenshots(uploadedIDs) }
+        if !client.dryRun { try await waitForScreenshots(uploadedIDs, label: label) }
         try await client.patch("/v1/appScreenshotSets/\(setID)/relationships/appScreenshots", [
             "data": .array(uploadedIDs.map { ["type": "appScreenshots", "id": .string($0)] }),
         ])
         return .replaced(files.count)
     }
 
-    func waitForScreenshots(_ ids: [String]) async throws {
-        for id in ids {
-            for attempt in 0..<60 {
+    /// Apple has taken 10-15 minutes to process a set of screenshots, so this waits up to
+    /// `timeoutMinutes` and says how far it has got every `progressEvery` seconds.
+    func waitForScreenshots(_ ids: [String], label: String, timeoutMinutes: Int = 30, pollSeconds: Double = 5, progressEvery: Double = 30) async throws {
+        var pending = ids
+        var elapsed: Double = 0
+        var lastReport: Double = 0
+        while true {
+            var stillPending: [String] = []
+            for id in pending {
                 let shot = try await client.get("/v1/appScreenshots/\(id)", query: [("fields[appScreenshots]", "assetDeliveryState,fileName")])
                 let state = shot["data"]["attributes"]["assetDeliveryState"]["state"].string ?? ""
-                if state == "COMPLETE" { break }
+                if state == "COMPLETE" { continue }
                 if state == "FAILED" {
                     let errors = shot["data"]["attributes"]["assetDeliveryState"]["errors"].array.compactMap { $0["description"].string }
                     throw LaunchError.api("Screenshot \(shot["data"]["attributes"]["fileName"].string ?? id) failed processing: \(errors.joined(separator: "; "))")
                 }
-                if attempt == 59 { throw LaunchError.api("Screenshot \(id) is still processing after 5 minutes") }
-                await client.sleep(5)
+                stillPending.append(id)
             }
+            pending = stillPending
+            if pending.isEmpty {
+                if elapsed > 0 { console.info("\(label): all \(ids.count) processed (\(Self.duration(elapsed)))") }
+                return
+            }
+            if elapsed >= Double(timeoutMinutes * 60) {
+                throw LaunchError.api("\(label): \(pending.count) of \(ids.count) screenshots still processing after \(timeoutMinutes) minutes. Wait for Apple to finish, then run liftoff again: sets that have finished are left alone.")
+            }
+            if elapsed - lastReport >= progressEvery || elapsed == 0 {
+                console.info("… \(label): \(ids.count - pending.count)/\(ids.count) processed by Apple (\(Self.duration(elapsed)))")
+                lastReport = elapsed
+            }
+            await client.sleep(pollSeconds)
+            elapsed += pollSeconds
         }
+    }
+
+    static func duration(_ seconds: Double) -> String {
+        let s = Int(seconds)
+        return s < 60 ? "\(s)s" : "\(s / 60)m \(s % 60)s"
     }
 
     // MARK: Build
