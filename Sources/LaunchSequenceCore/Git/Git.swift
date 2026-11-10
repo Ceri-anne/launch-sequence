@@ -152,12 +152,25 @@ public struct GitHub: Sendable {
         return try shell.change(args, cwd: cwd).trimmed
     }
 
-    /// Waits for the PR's checks to finish. Returns false if any failed.
-    public func watchChecks(pr: String, cwd: URL? = nil, repo: String? = nil) throws -> Bool {
-        var args = ["gh", "pr", "checks", pr, "--watch", "--interval", "20"]
+    /// The state of a PR's checks. `.none` means none have registered yet.
+    public func prChecks(pr: String, cwd: URL? = nil, repo: String? = nil) throws -> CheckState {
+        var args = ["gh", "pr", "checks", pr, "--json", "name,bucket"]
         if let repo { args += ["--repo", repo] }
-        if shell.dryRun { shell.console.dry(Shell.display(args)); return true }
-        return try shell.runner.run(args, cwd: cwd ?? shell.root, environment: [:], mode: .interactive).status == 0
+        let result = try shell.read(args, cwd: cwd, allowFailure: true)
+        if result.trimmed.hasPrefix("[") { return try Self.summarise(prChecksJSON: Data(result.trimmed.utf8)) }
+        if (result.stderr + result.stdout).contains("no checks reported") { return .none }
+        throw LaunchError.command("`\(Shell.display(args))` failed (\(result.status)):\n\(result.stderr)")
+    }
+
+    static func summarise(prChecksJSON data: Data) throws -> CheckState {
+        struct Check: Decodable { var name: String; var bucket: String }
+        let checks = try JSONDecoder().decode([Check].self, from: data)
+        if checks.isEmpty { return .none }
+        let failed = checks.filter { ["fail", "cancel"].contains($0.bucket) }
+        if !failed.isEmpty { return .failed(failed.map { "\($0.name) (\($0.bucket))" }) }
+        let pending = checks.filter { $0.bucket == "pending" }
+        if !pending.isEmpty { return .pending(pending.map(\.name)) }
+        return .passed(checks.count)
     }
 
     public func mergePullRequest(pr: String, cwd: URL? = nil, repo: String? = nil) throws {
