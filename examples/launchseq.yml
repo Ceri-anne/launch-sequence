@@ -31,6 +31,7 @@ screenshots:
   # Frames Raw/<lang>/<device>/ into AppStore/<lang>/<device>/. Needs Playwright once:
   #   npm install --no-save playwright && npx playwright install chromium
   render: [node, scripts/render_store_screenshots.js]
+  # upload: manual           # drag them into App Store Connect yourself; liftoff checks them
   # Debug builds: Release compiles out the -screenshotScene hook.
   builds:
     - scheme: PrimeTime
