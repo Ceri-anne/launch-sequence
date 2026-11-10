@@ -133,7 +133,7 @@ public struct Liftoff: Sendable {
                     }
                     guard !locals.isEmpty else { continue }
                     let locID = locIDs[locale] ?? "dryrun-loc-\(locale)"
-                    switch try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals) {
+                    switch try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals, label: "\(locale) \(group.displayType)") {
                     case .unchanged: console.ok("\(locale) \(group.displayType): unchanged")
                     case .replaced(let n): console.ok("\(locale) \(group.displayType): uploaded \(n)")
                     }

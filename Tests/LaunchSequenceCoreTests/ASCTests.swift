@@ -24,6 +24,9 @@ final class FakeASC: @unchecked Sendable {
     var setOrder: [String] = []
     var setExists = false
     var nextID = 0
+    /// How many status checks each screenshot answers "still processing" to after upload.
+    var processingPolls = 0
+    var pollsLeft: [String: Int] = [:]
 
     func handle(_ r: URLRequest) throws -> (Data, Int) {
         lock.lock(); defer { lock.unlock() }
@@ -50,9 +53,15 @@ final class FakeASC: @unchecked Sendable {
             let id = String(p.dropFirst("/v1/appScreenshots/".count))
             let body = try JSONValue.parse(r.httpBody!)
             screenshots[id] = ["id": .string(id), "attributes": ["fileName": screenshots[id]!["attributes"]["fileName"], "sourceFileChecksum": body["data"]["attributes"]["sourceFileChecksum"], "assetDeliveryState": ["state": "COMPLETE"]]]
+            pollsLeft[id] = processingPolls
             return try doc(["data": screenshots[id]!])
         case ("GET", let p) where p.hasPrefix("/v1/appScreenshots/"):
-            return try doc(["data": screenshots[String(p.dropFirst("/v1/appScreenshots/".count))]!])
+            let id = String(p.dropFirst("/v1/appScreenshots/".count))
+            if let left = pollsLeft[id], left > 0 {
+                pollsLeft[id] = left - 1
+                return try doc(["data": ["id": .string(id), "attributes": ["fileName": screenshots[id]!["attributes"]["fileName"], "assetDeliveryState": ["state": "UPLOAD_COMPLETE"]]]])
+            }
+            return try doc(["data": screenshots[id]!])
         case ("DELETE", let p) where p.hasPrefix("/v1/appScreenshots/"):
             let id = String(p.dropFirst("/v1/appScreenshots/".count))
             screenshots[id] = nil
@@ -69,6 +78,13 @@ final class FakeASC: @unchecked Sendable {
 
 func testCredentials() -> ASCCredentials { ASCCredentials(keyID: "ABC123DEF4", issuerID: "i", privateKey: P256.Signing.PrivateKey()) }
 let quietConsole = Console(answers: [], sink: { _ in })
+
+final class LineSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func append(_ line: String) { lock.lock(); lines.append(line); lock.unlock() }
+    var all: [String] { lock.lock(); defer { lock.unlock() }; return lines }
+}
 
 @Suite("App Store Connect")
 struct ASCTests {
@@ -90,6 +106,36 @@ struct ASCTests {
         let changed = [files[0], AppStoreConnect.LocalScreenshot(fileName: "02.png", data: Data("TWO".utf8))]
         #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: changed) == .replaced(2))
         #expect(fake.screenshots.count == 2)
+    }
+
+    @Test func slowProcessingReportsProgressAndFinishes() async throws {
+        let fake = FakeASC()
+        fake.processingPolls = 30   // 30 checks x 5s = 2m 30s at Apple
+        let lines = LineSink()
+        let console = Console(answers: [], sink: { lines.append($0) })
+        let client = ASCClient(credentials: testCredentials(), transport: RecordingTransport { try fake.handle($0) }, console: console, dryRun: false, sleep: { _ in })
+        let files = (1...4).map { AppStoreConnect.LocalScreenshot(fileName: "0\($0).png", data: Data("\($0)".utf8)) }
+
+        let result = try await AppStoreConnect(client: client, console: console)
+            .syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files, label: "en-GB APP_IPHONE_61")
+
+        #expect(result == .replaced(4))
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: uploading 4 screenshots") })
+        #expect(lines.all.contains { $0.contains("… en-GB APP_IPHONE_61: 0/4 processed by Apple (0s)") })
+        #expect(lines.all.contains { $0.contains("(30s)") })
+        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: all 4 processed (2m 30s)") })
+    }
+
+    @Test func processingTimeoutSaysWhatIsLeftAndHowToResume() async throws {
+        let fake = FakeASC()
+        fake.processingPolls = 1_000
+        let client = ASCClient(credentials: testCredentials(), transport: RecordingTransport { try fake.handle($0) }, console: quietConsole, dryRun: false, sleep: { _ in })
+        await #expect {
+            try await AppStoreConnect(client: client, console: quietConsole)
+                .syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: [.init(fileName: "a.png", data: Data("x".utf8))], label: "fr-FR APP_IPHONE_61")
+        } throws: { error in
+            "\(error)".contains("fr-FR APP_IPHONE_61: 1 of 1 screenshots still processing after 30 minutes")
+        }
     }
 
     @Test func jwtGoesOnlyToTheAPIAndNeverToUploads() async throws {
