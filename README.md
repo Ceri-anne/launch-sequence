@@ -106,12 +106,12 @@ launchseq countdown --set-version 2.0.0
 launchseq countdown --dry-run           # show the plan, change nothing
 ```
 
-1. Checks that the tree is clean, then fetches. The **latest `X.Y.Z` tag is the source of truth** for the current version, and other tag shapes are ignored. If `MARKETING_VERSION` is already ahead of the bumped tag, the larger version is used.
+1. Checks that the tree is clean, then fetches. The only changes it allows are countdown's own output (the version file, release notes, screenshots) from an unfinished run of the same version, on its release branch. The **latest `X.Y.Z` tag is the source of truth** for the current version, and other tag shapes are ignored. If `MARKETING_VERSION` is already ahead of the bumped tag, the larger version is used.
 2. Checks the App Store copy against Apple's limits before anything slow runs.
-3. Creates `release/<version>` from `origin/main`.
+3. Creates `release/<version>` from `origin/main`. If the branch already exists, countdown carries on with it only if it starts from the latest `origin/main` and holds nothing but countdown's own commits. Countdown never amends a commit; a re-run adds a new one.
 4. Runs the test suite on the simulator from the config. It needs an exact OS version, because several runtimes can share a device name.
 5. Bumps `MARKETING_VERSION` everywhere it appears in `version.file`.
-6. Builds Debug apps and captures every language × device × scene. If a device has a `before:` step (such as unfolding a simulator in Device Hub), countdown waits for you. Then it runs the app's `render` hook and checks every rendered image against the slot's accepted pixel sizes.
+6. Builds Debug apps and captures every language × device × scene. If a device has a `before:` step (such as unfolding a simulator in Device Hub), countdown waits for you. Then it runs the app's `render` hook and checks every rendered image against the slot's accepted pixel sizes. With `--skip-screenshots`, or when the captures are already done, it skips capturing but renders again if any raw capture is newer than the framed images.
 7. Drafts English release notes from the commit subjects since the last tag and opens them in `$EDITOR`. Once you've saved them, Claude translates them into each other locale, using that locale's description as a guide to tone. Countdown refuses to ship notes that haven't changed since the last release, unless you pass `--reuse-notes`.
 8. Warns if files matching `privacy_sensitive_paths` changed but the website pages didn't.
 9. Commits and opens a release PR. Review the screenshots and translations there, then **Rebase and merge**. `--direct` pushes to the base branch instead.

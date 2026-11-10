@@ -167,3 +167,34 @@ public enum ScreenshotValidator {
         return FileManager.default.files(in: folder, withExtension: "png").filter { wanted.contains($0.lastPathComponent) }
     }
 }
+
+/// Whether the framed screenshots are older than the raw captures they're made from.
+public enum ScreenshotFreshness {
+    /// True when any raw capture is newer than any framed image countdown expects, or
+    /// when there are captures and a framed image is missing.
+    public static func framesAreStale(config: Config, root: URL) throws -> Bool {
+        guard let shots = config.screenshots else { return false }
+        let raw = try SafePath.resolve(shots.rawDir, under: root)
+        guard let newestRaw = modificationDates(under: raw).max() else { return false }
+        let out = try SafePath.resolve(shots.outputDir, under: root)
+        var oldestFramed: Date?
+        for e in ScreenshotValidator.expected(config) {
+            for scene in shots.scenes {
+                let file = out.appendingPathComponent(e.language.code).appendingPathComponent(e.device.name).appendingPathComponent("\(scene.name).png")
+                guard let date = modificationDate(file) else { return true }
+                oldestFramed = min(oldestFramed ?? date, date)
+            }
+        }
+        guard let oldestFramed else { return false }
+        return newestRaw > oldestFramed
+    }
+
+    static func modificationDate(_ url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    static func modificationDates(under root: URL) -> [Date] {
+        guard let walk = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else { return [] }
+        return walk.compactMap { ($0 as? URL).flatMap { $0.pathExtension.lowercased() == "png" ? modificationDate($0) : nil } }
+    }
+}
