@@ -189,15 +189,19 @@ public struct AppStoreConnect: Sendable {
         let label = label ?? displayType
         let sets = try await client.getAll("/v1/appStoreVersionLocalizations/\(localizationID)/appScreenshotSets")
         var setID = sets.first(where: { $0["attributes"]["screenshotDisplayType"].string == displayType })?["id"].string
+        var keptIDs: [String] = []
         if let setID {
             let current = try await client.getAll("/v1/appScreenshotSets/\(setID)/appScreenshots")
-            let matches = current.count == files.count && zip(current, files).allSatisfy { remote, local in
+            // Keep the screenshots at the start that are already right, so a run that stopped
+            // partway carries on from where it got to. Everything after them is replaced.
+            let kept = zip(current, files).prefix { remote, local in
                 remote["attributes"]["fileName"].string == local.fileName
                     && remote["attributes"]["sourceFileChecksum"].string?.lowercased() == local.md5
                     && remote["attributes"]["assetDeliveryState"]["state"].string == "COMPLETE"
-            }
-            if matches { return .unchanged }
-            for shot in current { if let id = shot["id"].string { try await client.delete("/v1/appScreenshots/\(id)") } }
+            }.count
+            if kept == files.count && current.count == files.count { return .unchanged }
+            keptIDs = current.prefix(kept).compactMap { $0["id"].string }
+            for shot in current.dropFirst(kept) { if let id = shot["id"].string { try await client.delete("/v1/appScreenshots/\(id)") } }
         } else {
             let created = try await client.post("/v1/appScreenshotSets", [
                 "data": [
@@ -210,9 +214,12 @@ public struct AppStoreConnect: Sendable {
         }
         guard let setID else { throw LaunchError.api("No screenshot set ID for \(displayType)") }
 
-        var uploadedIDs: [String] = []
-        console.step("\(label): uploading \(files.count) screenshot\(files.count == 1 ? "" : "s")")
-        for file in files {
+        // One at a time: each screenshot is uploaded and processed by Apple before the next starts.
+        var uploadedIDs = keptIDs
+        let toUpload = files.count - keptIDs.count
+        console.step("\(label): uploading \(toUpload) screenshot\(toUpload == 1 ? "" : "s") one at a time\(keptIDs.isEmpty ? "" : " (the first \(keptIDs.count) are already there)")")
+        for (n, file) in files.enumerated().dropFirst(keptIDs.count) {
+            console.info("\(label): \(n + 1)/\(files.count) \(file.fileName)")
             let reserved = try await client.post("/v1/appScreenshots", [
                 "data": [
                     "type": "appScreenshots",
@@ -227,13 +234,13 @@ public struct AppStoreConnect: Sendable {
             try await client.patch("/v1/appScreenshots/\(shotID)", [
                 "data": ["type": "appScreenshots", "id": .string(shotID), "attributes": ["uploaded": true, "sourceFileChecksum": .string(file.md5)]],
             ])
+            if !client.dryRun { try await waitForScreenshots([shotID], label: "\(label) \(file.fileName)") }
             uploadedIDs.append(shotID)
         }
-        if !client.dryRun { try await waitForScreenshots(uploadedIDs, label: label) }
         try await client.patch("/v1/appScreenshotSets/\(setID)/relationships/appScreenshots", [
             "data": .array(uploadedIDs.map { ["type": "appScreenshots", "id": .string($0)] }),
         ])
-        return .replaced(files.count)
+        return .replaced(toUpload)
     }
 
     /// Apple has taken 10-15 minutes to process a set of screenshots, so this waits up to
@@ -256,11 +263,11 @@ public struct AppStoreConnect: Sendable {
             }
             pending = stillPending
             if pending.isEmpty {
-                if elapsed > 0 { console.info("\(label): all \(ids.count) processed (\(Self.duration(elapsed)))") }
+                if elapsed > 0 { console.info("\(label): \(ids.count == 1 ? "" : "all \(ids.count) ")processed (\(Self.duration(elapsed)))") }
                 return
             }
             if elapsed >= Double(timeoutMinutes * 60) {
-                throw LaunchError.api("\(label): \(pending.count) of \(ids.count) screenshots still processing after \(timeoutMinutes) minutes. Wait for Apple to finish, then run liftoff again: sets that have finished are left alone.")
+                throw LaunchError.api("\(label): \(pending.count) of \(ids.count) screenshot\(ids.count == 1 ? "" : "s") still processing after \(timeoutMinutes) minutes. Wait for Apple to finish, then run liftoff again: screenshots that have finished are left alone.")
             }
             if elapsed - lastReport >= progressEvery || elapsed == 0 {
                 console.info("… \(label): \(ids.count - pending.count)/\(ids.count) processed by Apple (\(Self.duration(elapsed)))")
