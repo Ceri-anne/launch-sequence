@@ -59,6 +59,7 @@ Suggested order: **1 → 2 → 4 → 3 → 5 → 8 → 6 → 7**. PRs 2 and 4 ca
 
 **Problem:** `syncScreenshots` is all-or-nothing per set. If anything differs, it deletes the whole set and uploads every screenshot again, so adding one screenshot uploads four, and one failed image re-uploads the rest.
 
+- Add `--skip-screenshots` to liftoff, like `--skip-website`, so a rerun can skip the Screenshots step. For now, the only way is a copy of the config with the `screenshots:` section removed, passed with `--config`. Print a warning that skipped locales keep whatever screenshots App Store Connect already has.
 - Compare screenshots one at a time:
   - Keep any screenshot whose file name and checksum match and whose state is `COMPLETE`.
   - Delete the ones that don't match or failed, and upload the missing ones.
