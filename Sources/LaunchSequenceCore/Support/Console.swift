@@ -89,31 +89,30 @@ public struct Console: Sendable {
     }
 }
 
-/// Prints a "still working" line on a background timer until stopped.
+/// Prints a "still working" line from its own thread until stopped. A plain thread
+/// rather than a dispatch timer, which a busy machine can put off indefinitely.
 final class Heartbeat: @unchecked Sendable {
-    private let timer: DispatchSourceTimer
-    private let lock = NSLock()
-    private var stopped = false
+    private let wake = DispatchSemaphore(value: 0)
+    private let finished = DispatchSemaphore(value: 0)
 
     init(what: String, every interval: Double, write: @escaping @Sendable (String) -> Void) {
         let started = Date()
-        timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + interval, repeating: interval)
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.lock.lock(); defer { self.lock.unlock() }
-            guard !self.stopped else { return }
-            write("    … still \(what) (\(Console.duration(Date().timeIntervalSince(started))))")
+        let wake = wake, finished = finished
+        let thread = Thread {
+            // Each wait times out after `interval` unless stop() signals first.
+            while wake.wait(timeout: .now() + interval) == .timedOut {
+                write("    … still \(what) (\(Console.duration(Date().timeIntervalSince(started))))")
+            }
+            finished.signal()
         }
-        timer.resume()
+        thread.name = "launchseq heartbeat"
+        thread.start()
     }
 
     /// After this returns, no more lines are written.
     func stop() {
-        lock.lock(); defer { lock.unlock() }
-        guard !stopped else { return }
-        stopped = true
-        timer.cancel()
+        wake.signal()
+        finished.wait()
     }
 }
 

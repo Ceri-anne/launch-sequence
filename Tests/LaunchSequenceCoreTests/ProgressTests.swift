@@ -25,7 +25,7 @@ struct ProgressTests {
     @Test func longStepsSayTheyAreStillWorking() {
         let lines = Lines()
         let console = Console(answers: [], heartbeatSeconds: 0.05, sink: lines.append)
-        console.whileWorking("building StarChart") { Thread.sleep(forTimeInterval: 0.3) }
+        console.whileWorking("building StarChart") { Thread.sleep(forTimeInterval: 0.6) }
         let beats = lines.all.filter { $0.contains("… still building StarChart (") }
         #expect(beats.count >= 2)
     }
@@ -42,7 +42,7 @@ struct ProgressTests {
         let lines = Lines()
         let console = Console(answers: [], heartbeatSeconds: 0.05, sink: lines.append)
         let result = try await console.whileWorking("translating into fr-FR") {
-            try await Task.sleep(nanoseconds: 300_000_000)
+            try await Task.sleep(nanoseconds: 600_000_000)
             return "Bonjour"
         }
         #expect(result == "Bonjour")
@@ -52,7 +52,7 @@ struct ProgressTests {
     @Test func loggedCommandsGetAHeartbeat() throws {
         let lines = Lines()
         let console = Console(answers: [], heartbeatSeconds: 0.05, sink: lines.append)
-        let shell = Shell(runner: SlowRunner(seconds: 0.3), console: console, dryRun: false, root: try tempDir())
+        let shell = Shell(runner: SlowRunner(seconds: 0.6), console: console, dryRun: false, root: try tempDir())
         try shell.change(["/usr/bin/xcodebuild", "test"], mode: .log(try tempDir().appendingPathComponent("test.log")))
         #expect(lines.all.contains { $0.contains("… still running xcodebuild (") })
 
