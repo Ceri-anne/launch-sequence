@@ -129,9 +129,9 @@ launchseq liftoff
 ```
 
 1. Reads the version from `main`, and checks the copy and screenshots.
-2. Requires green CI checks (Xcode Cloud reports them to GitHub) on the release commit. `--force` overrides this.
+2. Requires green CI checks (Xcode Cloud reports them to GitHub) on the release commit. It waits up to 5 minutes for checks to register, then for them to finish. If none register, it looks for an Xcode Cloud build of the commit in the `app_store.ci_workflow` workflow (`Main` by default) and, if there isn't one, offers to start it on `main`. `--force` skips the wait and carries on whatever the checks say.
 3. After confirming with you, pushes an annotated tag, which starts the Xcode Cloud Release build. It also creates a **draft** GitHub release.
-4. Copies the website pages into a temporary clone of the site repo and, if they've changed, opens a PR. It waits for the PR's checks and asks before merging.
+4. Copies the website pages into a temporary clone of the site repo and, if they've changed, opens a PR. It waits for the PR's checks to register and finish, and asks before merging. If no checks register, it says so and asks whether to merge anyway.
 5. In App Store Connect: creates or reuses the version, sets the release type and phased release, and updates the name, subtitle, privacy URL, description, keywords, promotional text and What's New in every locale. It replaces the screenshots that changed, one at a time: each is uploaded and processed by Apple before the next starts, and a re-run keeps the ones at the start of a set that are already right. Then it waits for the build to finish processing, attaches it, and sets TestFlight's What to Test text.
 6. Publishes the GitHub release and prints a summary with a link to the App Store Connect version.
 

@@ -85,6 +85,7 @@ app_store:
   metadata_dir: AppStoreAssets/metadata
   release_type: MANUAL
   phased_release: true
+  ci_workflow: Main                # the Xcode Cloud workflow that builds main; liftoff offers to start it if no checks report
 
 release_notes:
   # Commit subjects matching these are left out of the English draft.

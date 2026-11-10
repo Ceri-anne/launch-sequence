@@ -371,12 +371,15 @@ public struct AppStoreSection: Codable, Sendable, Equatable {
     public var releaseType: String
     public var phasedRelease: Bool
     public var buildTimeoutMinutes: Int
+    /// The Xcode Cloud workflow that builds the base branch and reports CI checks.
+    /// Liftoff offers to start it when no checks have reported on the release commit.
+    public var ciWorkflow: String
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case bundleId = "bundle_id", appId = "app_id", platform
         case metadataDir = "metadata_dir", primaryLocale = "primary_locale"
         case releaseType = "release_type", phasedRelease = "phased_release"
-        case buildTimeoutMinutes = "build_timeout_minutes"
+        case buildTimeoutMinutes = "build_timeout_minutes", ciWorkflow = "ci_workflow"
     }
     public init(from decoder: Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
@@ -389,6 +392,7 @@ public struct AppStoreSection: Codable, Sendable, Equatable {
         releaseType = try c.decodeIfPresent(String.self, forKey: .releaseType) ?? "MANUAL"
         phasedRelease = try c.decodeIfPresent(Bool.self, forKey: .phasedRelease) ?? true
         buildTimeoutMinutes = try c.decodeIfPresent(Int.self, forKey: .buildTimeoutMinutes) ?? 90
+        ciWorkflow = try c.decodeIfPresent(String.self, forKey: .ciWorkflow) ?? "Main"
         guard ["MANUAL", "AFTER_APPROVAL", "SCHEDULED"].contains(releaseType) else {
             throw LaunchError.config("`app_store.release_type` must be MANUAL, AFTER_APPROVAL or SCHEDULED")
         }

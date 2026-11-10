@@ -12,9 +12,13 @@ public struct Liftoff: Sendable {
     let ctx: Context
     let options: Options
     let transport: HTTPTransport
+    let sleep: @Sendable (Double) -> Void
+    let credentials: @Sendable () throws -> ASCCredentials
 
-    public init(ctx: Context, options: Options, transport: HTTPTransport = URLSessionTransport()) {
-        self.ctx = ctx; self.options = options; self.transport = transport
+    public init(ctx: Context, options: Options, transport: HTTPTransport = URLSessionTransport(),
+                sleep: @escaping @Sendable (Double) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                credentials: @escaping @Sendable () throws -> ASCCredentials = { try ASCCredentials.load() }) {
+        self.ctx = ctx; self.options = options; self.transport = transport; self.sleep = sleep; self.credentials = credentials
     }
 
     var config: Config { ctx.config }
@@ -58,18 +62,7 @@ public struct Liftoff: Sendable {
 
         // 2. CI gate
         let repo = try ctx.github.repoName()
-        if !tagExists {
-            console.stage("CI checks on \(commit.prefix(8))")
-            switch try ctx.github.checks(repo: repo, commit: commit) {
-            case .passed(let n): console.ok("\(n) check\(n == 1 ? "" : "s") passed")
-            case .pending(let names) where options.force: console.warn("Still running: \(names.joined(separator: ", ")). Carrying on (--force).")
-            case .pending(let names): throw LaunchError.precondition("Checks still running: \(names.joined(separator: ", ")). Wait for them, or pass --force.")
-            case .failed(let names) where options.force: console.warn("Failed: \(names.joined(separator: ", ")). Carrying on (--force).")
-            case .failed(let names): throw LaunchError.precondition("Checks failed: \(names.joined(separator: ", ")). Fix them, or pass --force.")
-            case .none where options.force: console.warn("No checks reported. Carrying on (--force).")
-            case .none: throw LaunchError.precondition("No CI checks reported on \(commit.prefix(8)). Is Xcode Cloud reporting to GitHub? Pass --force to skip this.")
-            }
-        }
+        if !tagExists { try await checkCI(repo: repo, commit: commit) }
 
         // 3. Tag (this starts the Xcode Cloud Release workflow) and draft GitHub release.
         console.stage("Tag and GitHub release")
@@ -105,7 +98,7 @@ public struct Liftoff: Sendable {
 
         // 5. App Store Connect
         console.stage("App Store Connect")
-        let creds = try ASCCredentials.load()
+        let creds = try credentials()
         let client = ASCClient(credentials: creds, transport: transport, console: console, dryRun: ctx.dryRun)
         let asc = AppStoreConnect(client: client, console: console)
         let appID = try await asc.appID(bundleID: config.appStore.bundleId, configured: config.appStore.appId)
@@ -174,6 +167,69 @@ public struct Liftoff: Sendable {
         console.info("Release:      \(config.appStore.releaseType.lowercased().replacingOccurrences(of: "_", with: " ")), phased \(config.appStore.phasedRelease ? "on" : "off")")
         console.info("Check it, then press Submit for Review yourself:")
         console.info("https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight")
+    }
+
+    /// Requires green CI on the release commit. Waits for checks to register and finish,
+    /// and if Xcode Cloud hasn't built the commit at all, offers to start the workflow.
+    func checkCI(repo: String, commit: String) async throws {
+        let short = String(commit.prefix(8))
+        console.stage("CI checks on \(short)")
+        let fetch = { try ctx.github.checks(repo: repo, commit: commit) }
+        var state: GitHub.CheckState
+        if options.force || ctx.dryRun {
+            state = try fetch()
+        } else {
+            state = try waiter(appearMinutes: 5).wait(short, fetch: fetch)
+        }
+        if state == .none, !options.force, try await startCIBuild(commit: commit) {
+            // Xcode Cloud takes a few minutes to pick up a new build and report it to GitHub.
+            state = ctx.dryRun ? try fetch() : try waiter(appearMinutes: 15).wait(short, fetch: fetch)
+        }
+        switch state {
+        case .passed(let n): console.ok("\(n) check\(n == 1 ? "" : "s") passed")
+        case .pending(let names) where options.force: console.warn("Still running: \(names.joined(separator: ", ")). Carrying on (--force).")
+        case .pending(let names): throw LaunchError.precondition("Checks still running after \(config.appStore.buildTimeoutMinutes) minutes: \(names.joined(separator: ", ")). Run liftoff again when they finish, or pass --force.")
+        case .failed(let names) where options.force: console.warn("Failed: \(names.joined(separator: ", ")). Carrying on (--force).")
+        case .failed(let names): throw LaunchError.precondition("Checks failed: \(names.joined(separator: ", ")). Fix them, or pass --force.")
+        case .none where options.force: console.warn("No checks reported. Carrying on (--force).")
+        case .none: throw LaunchError.precondition("No CI checks have reported on \(short). Is Xcode Cloud reporting to GitHub? Pass --force to skip this.")
+        }
+    }
+
+    func waiter(appearMinutes: Double) -> CheckWaiter {
+        CheckWaiter(console: console, appearMinutes: appearMinutes, finishMinutes: Double(config.appStore.buildTimeoutMinutes), sleep: sleep)
+    }
+
+    /// When no checks have reported, Xcode Cloud may not have built the commit at all
+    /// (its start condition didn't fire on the push). Returns true if a build of the
+    /// commit is now running, so it's worth waiting for its checks again.
+    func startCIBuild(commit: String) async throws -> Bool {
+        let short = String(commit.prefix(8))
+        let name = config.appStore.ciWorkflow
+        let branch = config.release.baseBranch
+        do {
+            let client = ASCClient(credentials: try credentials(), transport: transport, console: console, dryRun: ctx.dryRun)
+            let appID = try await AppStoreConnect(client: client, console: console).appID(bundleID: config.appStore.bundleId, configured: config.appStore.appId)
+            let cloud = XcodeCloud(client: client)
+            guard let workflow = try await cloud.workflow(appID: appID, named: name) else {
+                console.warn("Xcode Cloud has no workflow called \(name). Set `app_store.ci_workflow` to the one that builds \(branch).")
+                return false
+            }
+            if let run = try await cloud.buildRun(workflowID: workflow.id, commit: commit) {
+                console.info("Xcode Cloud \(name) build\(run.number.map { " \($0)" } ?? "") of \(short) is \(run.progress.lowercased()). Waiting for its checks.")
+                return true
+            }
+            console.warn("Xcode Cloud hasn't started a \(name) build of \(short).")
+            guard try console.confirm("Start the \(name) workflow on \(branch) (\(short)) now?") else { return false }
+            let run = try await cloud.startBuild(workflow: workflow, branch: branch)
+            if !ctx.dryRun { console.ok("Started \(name) build\(run.number.map { " \($0)" } ?? "")") }
+            return true
+        } catch {
+            // Saying no to the prompt stops the run; anything else just means no offer.
+            if case LaunchError.aborted = error { throw error }
+            console.warn("Couldn't check Xcode Cloud: \((error as? LaunchError)?.description ?? error.localizedDescription)")
+            return false
+        }
     }
 
     func tagDateOf(_ tag: String) throws -> Date {

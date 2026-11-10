@@ -8,9 +8,11 @@ public struct WebsiteSync: Sendable {
     let shell: Shell
     let github: GitHub
     let console: Console
+    let waiter: CheckWaiter
 
-    public init(site: WebsiteSection, shell: Shell, console: Console) {
+    public init(site: WebsiteSection, shell: Shell, console: Console, waiter: CheckWaiter? = nil) {
         self.site = site; self.shell = shell; self.github = GitHub(shell: shell); self.console = console
+        self.waiter = waiter ?? CheckWaiter(console: console)
     }
 
     /// Files under the source folder, as paths relative to it.
@@ -70,13 +72,26 @@ public struct WebsiteSync: Sendable {
         return try finish(pr: url.isEmpty ? branch : url, cwd: work)
     }
 
-    private func finish(pr: String, cwd: URL) throws -> Outcome {
+    func finish(pr: String, cwd: URL) throws -> Outcome {
         console.step("Waiting for the website PR's checks")
-        guard try github.watchChecks(pr: pr, cwd: cwd, repo: site.repo) else {
-            console.warn("Website checks failed; leaving the PR open: \(pr)")
+        if shell.dryRun {
+            console.dry("wait for \(pr)'s checks, then ask before merging it")
             return .openPR(pr)
         }
-        guard try console.confirm("Website checks passed. Merge \(pr) now (rebase and merge)?") else { return .openPR(pr) }
+        let question: String
+        switch try waiter.wait("the website PR", fetch: { try github.prChecks(pr: pr, cwd: cwd, repo: site.repo) }) {
+        case .passed(let n):
+            question = "Website checks passed (\(n)). Merge \(pr) now (rebase and merge)?"
+        case .none:
+            question = "No checks have registered on \(pr) after \(Int(waiter.appearMinutes)) minutes, so nothing has tested it. Merge it anyway (rebase and merge)?"
+        case .failed(let names):
+            console.warn("Website checks failed: \(names.joined(separator: ", ")). Leaving the PR open: \(pr)")
+            return .openPR(pr)
+        case .pending(let names):
+            console.warn("Website checks still running after \(Int(waiter.finishMinutes)) minutes: \(names.joined(separator: ", ")). Leaving the PR open: \(pr)")
+            return .openPR(pr)
+        }
+        guard try console.confirm(question) else { return .openPR(pr) }
         try github.mergePullRequest(pr: pr, cwd: cwd, repo: site.repo)
         console.ok("Merged website PR")
         return .merged(pr)
