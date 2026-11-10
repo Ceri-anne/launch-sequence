@@ -28,7 +28,9 @@ public struct Countdown: Sendable {
         if ctx.dryRun { console.info("Dry run: nothing is committed, pushed, built or captured.") }
 
         // 1. Preflight
-        guard try ctx.git.isClean() else { throw LaunchError.precondition("Commit or put aside your changes first: the working tree isn't clean.") }
+        // Changes are only allowed if they're this version's own output (checked once the version is known).
+        let dirty = try ctx.git.dirtyPaths()
+        try refuseOtherChanges(dirty)
         guard try ctx.github.authStatus() else { throw LaunchError.precondition("gh isn't signed in: run `gh auth login`.") }
         try ctx.git.fetch()
 
@@ -45,6 +47,7 @@ public struct Countdown: Sendable {
         var state = options.fresh ? RunState(version: version.description) : RunState.load(gitDir: gitDir, version: version.description)
         let branch = config.release.branchPrefix + version.description
         let lastTag = latestTag.map(\.description)
+        if !dirty.isEmpty { try checkResuming(dirty, version: version, branch: branch, gitDir: gitDir) }
 
         // 3. Copy (everything except release notes) is checked before anything slow runs.
         console.stage("Checking App Store copy")
@@ -54,12 +57,16 @@ public struct Countdown: Sendable {
 
         // 4. Branch
         if !options.direct {
-            if try ctx.git.currentBranch() == branch {
+            let onBranch = try ctx.git.currentBranch() == branch
+            if try onBranch || ctx.git.branchExists(branch) {
+                try checkReleaseHistory(branch: branch, version: version)
+                if !onBranch { try ctx.git.switchBranch(branch) }
                 console.ok("Continuing on \(branch)")
             } else {
                 try ctx.git.checkoutNewBranch(branch, from: ctx.remoteBase)
                 if !ctx.dryRun { console.ok("Created \(branch) from \(ctx.remoteBase)") }
             }
+            state.mark("branch", branch); try state.save(gitDir: gitDir, dryRun: ctx.dryRun)
         } else {
             guard try ctx.git.currentBranch() == config.release.baseBranch else {
                 throw LaunchError.precondition("--direct commits to \(config.release.baseBranch); switch to it first.")
@@ -94,10 +101,15 @@ public struct Countdown: Sendable {
         // 7. Screenshots
         if config.screenshots != nil {
             console.stage("Screenshots")
-            if options.skipScreenshots {
-                console.warn("Reusing the committed screenshots (--skip-screenshots)")
-            } else if state.has("screenshots") {
-                console.ok("Already captured and rendered for \(version) (use --fresh to redo)")
+            if options.skipScreenshots || state.has("screenshots") {
+                if options.skipScreenshots { console.warn("Reusing the raw captures (--skip-screenshots)") }
+                else { console.ok("Already captured for \(version) (use --fresh to redo)") }
+                if try ScreenshotFreshness.framesAreStale(config: config, root: ctx.root) {
+                    console.step("The raw captures are newer than the framed screenshots, so rendering them again")
+                    try ScreenshotCapture(config: config, shell: ctx.shell, console: console).render()
+                } else {
+                    console.ok("Framed screenshots are up to date with the raw captures")
+                }
             } else {
                 let capture = try ScreenshotCapture(config: config, shell: ctx.shell, console: console)
                 try capture.build()
@@ -131,7 +143,9 @@ public struct Countdown: Sendable {
         try ctx.git.add(paths.filter { FileManager.default.fileExists(atPath: ctx.root.appendingPathComponent($0).path) })
         let hasChanges = try ctx.dryRun || ctx.git.hasStagedChanges()
         if hasChanges {
-            try ctx.git.commit(message: "Release \(version)\n\nVersion bump, App Store screenshots and release notes for \(version), prepared by launchseq countdown.")
+            // Always a new commit: countdown never amends, so it can't rewrite a commit it didn't make.
+            let again = try !ctx.dryRun && ctx.git.revParse("HEAD") != ctx.git.revParse(ctx.remoteBase) && !options.direct
+            try ctx.git.commit(message: "\(Self.commitSubject(version))\(again ? ": updates" : "")\n\nVersion bump, App Store screenshots and release notes for \(version), prepared by launchseq countdown.")
         }
         let notes = (try? Metadata.read(ctx.root.appendingPathComponent(LocaleMetadata.path(metadataDir: config.appStore.metadataDir, locale: config.appStore.primaryLocale, field: .releaseNotes)))) ?? nil
         if options.direct {
@@ -160,6 +174,60 @@ public struct Countdown: Sendable {
                 if !ctx.dryRun { console.ok("Opened \(url.isEmpty ? "the release PR" : url)") }
             }
             console.info("Next: review and Rebase and merge the PR, then `git switch \(config.release.baseBranch) && git pull --rebase && launchseq liftoff`.")
+        }
+    }
+
+    static func commitSubject(_ version: SemVer) -> String { "Release \(version)" }
+
+    /// Paths countdown writes: the version file, release notes, screenshots and its own logs.
+    var generatedPaths: [String] {
+        var paths = [config.version.file, "build/launchseq/"]
+        paths += ctx.ascLocales.map(notesPath)
+        if let s = config.screenshots { paths += [s.rawDir + "/", s.outputDir + "/"] }
+        return paths
+    }
+
+    static func isGenerated(_ path: String, by generated: [String]) -> Bool {
+        generated.contains { $0.hasSuffix("/") ? path.hasPrefix($0) : path == $0 }
+    }
+
+    /// Stops if anything other than countdown's own output has changed.
+    func refuseOtherChanges(_ dirty: [String]) throws {
+        let other = dirty.filter { !Self.isGenerated($0, by: generatedPaths) }
+        guard !other.isEmpty else { return }
+        let listed = other.prefix(10).map { "      \($0)" }.joined(separator: "\n") + (other.count > 10 ? "\n      …and \(other.count - 10) more" : "")
+        throw LaunchError.precondition("Commit or put aside your changes first: the working tree isn't clean.\n\(listed)")
+    }
+
+    /// Allows countdown's own leftover output only when it's from a run of this same version, on its branch.
+    func checkResuming(_ dirty: [String], version: SemVer, branch: String, gitDir: URL) throws {
+        let saved = RunState.saved(gitDir: gitDir)
+        let expectedBranch = options.direct ? config.release.baseBranch : branch
+        let current = try ctx.git.currentBranch()
+        guard let saved, saved.version == version.description, current == expectedBranch else {
+            let from = saved.map { "a countdown run for \($0.version)" } ?? "an earlier countdown run"
+            throw LaunchError.precondition("""
+                The working tree has changes in countdown's own files (\(dirty.count)), but they aren't from a run of \(version) on \(expectedBranch) \
+                (they look like \(from), and you're on \(current)). Commit or put them aside first.
+                """)
+        }
+        console.ok("Picking up the last run of \(version): \(dirty.count) generated file\(dirty.count == 1 ? "" : "s") changed")
+    }
+
+    /// An existing release branch must sit on top of the base branch and hold only countdown's commits.
+    func checkReleaseHistory(branch: String, version: SemVer) throws {
+        guard try ctx.git.isAncestor(ctx.remoteBase, of: branch) else {
+            throw LaunchError.precondition("""
+                \(branch) doesn't start from the latest \(ctx.remoteBase). Rebase it (git rebase \(ctx.remoteBase)), \
+                or delete it (git branch -D \(branch)) to start again.
+                """)
+        }
+        let foreign = try ctx.git.subjects(from: ctx.remoteBase, to: branch).filter { !$0.hasPrefix(Self.commitSubject(version)) }
+        guard foreign.isEmpty else {
+            throw LaunchError.precondition("""
+                \(branch) has commits countdown didn't make: \(foreign.prefix(5).map { "\"\($0)\"" }.joined(separator: ", ")). \
+                Move them to \(config.release.baseBranch) first, or delete the branch (git branch -D \(branch)) to start again.
+                """)
         }
     }
 

@@ -11,6 +11,35 @@ public struct Git: Sendable {
         try shell.read(["git", "status", "--porcelain"]).trimmed.isEmpty
     }
 
+    /// Every changed, staged or untracked path, relative to the repo root. Both sides of a rename are listed.
+    public func dirtyPaths() throws -> [String] {
+        let out = try shell.read(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"]).stdout
+        return Self.parsePorcelain(out)
+    }
+
+    static func parsePorcelain(_ out: String) -> [String] {
+        var paths: [String] = []
+        var entries = out.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)[...]
+        while let entry = entries.popFirst() {
+            guard entry.count > 3 else { continue }
+            let status = entry.prefix(2)
+            paths.append(String(entry.dropFirst(3)))
+            // A rename or copy is followed by its original path.
+            if status.contains("R") || status.contains("C"), let original = entries.popFirst() { paths.append(original) }
+        }
+        return paths
+    }
+
+    public func branchExists(_ name: String) throws -> Bool {
+        try GitRef.checkBranch(name)
+        return try shell.read(["git", "rev-parse", "--verify", "--quiet", "refs/heads/\(name)"], allowFailure: true).status == 0
+    }
+
+    public func switchBranch(_ name: String) throws {
+        try GitRef.checkBranch(name)
+        try shell.change(["git", "switch", name])
+    }
+
     public func currentBranch() throws -> String {
         try shell.read(["git", "rev-parse", "--abbrev-ref", "HEAD"]).trimmed
     }

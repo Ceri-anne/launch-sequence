@@ -65,6 +65,12 @@ public struct RunState: Codable, Equatable, Sendable {
         return state
     }
 
+    /// Whatever state was last saved, for any version.
+    public static func saved(gitDir: URL) -> RunState? {
+        guard let data = try? Data(contentsOf: url(gitDir: gitDir)) else { return nil }
+        return try? JSONDecoder().decode(RunState.self, from: data)
+    }
+
     public func save(gitDir: URL, dryRun: Bool) throws {
         guard !dryRun else { return }
         let url = Self.url(gitDir: gitDir)
