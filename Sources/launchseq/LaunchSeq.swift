@@ -34,7 +34,7 @@ struct LaunchSeq: AsyncParsableCommand {
           countdown  tests, version bump, screenshots, release notes, release PR
           liftoff    CI gate, tag, website pages, App Store Connect (stops before Submit for Review)
         """,
-        version: "0.1.0",
+        version: "0.2.0",
         subcommands: [CountdownCommand.self, LiftoffCommand.self, DoctorCommand.self, InitCommand.self, MigrateCopyCommand.self]
     )
 
