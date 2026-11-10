@@ -30,6 +30,11 @@ public struct ProcessRunner: CommandRunning {
 
     public func run(_ arguments: [String], cwd: URL?, environment: [String: String], mode: OutputMode) throws -> CommandResult {
         guard let program = arguments.first else { throw LaunchError.command("Empty command") }
+        if mode == .interactive {
+            let status = try ForegroundSpawn.run(try Self.locate(program), arguments: Array(arguments.dropFirst()), cwd: cwd,
+                                                 environment: ProcessInfo.processInfo.environment.merging(environment) { $1 })
+            return CommandResult(status: status, stdout: "", stderr: "")
+        }
         let process = Process()
         process.executableURL = try Self.locate(program)
         process.arguments = Array(arguments.dropFirst())
@@ -44,9 +49,7 @@ public struct ProcessRunner: CommandRunning {
 
         switch mode {
         case .interactive:
-            process.standardInput = FileHandle.standardInput
-            process.standardOutput = FileHandle.standardOutput
-            process.standardError = FileHandle.standardError
+            preconditionFailure("interactive commands run through ForegroundSpawn")
         case .capture:
             fm.createFile(atPath: outURL.path, contents: nil)
             fm.createFile(atPath: errURL.path, contents: nil)
@@ -121,7 +124,15 @@ public struct Shell: Sendable {
             return CommandResult(status: 0, stdout: "", stderr: "")
         }
         console.debug("$ " + Self.display(args))
-        let result = try runner.run(args, cwd: cwd ?? root, environment: environment, mode: mode)
+        let result: CommandResult
+        if case .log = mode {
+            // Logged commands are the slow ones (builds, tests, rendering), and print nothing here.
+            result = try console.whileWorking("running \(args.first.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "")") {
+                try runner.run(args, cwd: cwd ?? root, environment: environment, mode: mode)
+            }
+        } else {
+            result = try runner.run(args, cwd: cwd ?? root, environment: environment, mode: mode)
+        }
         if result.status != 0 && !allowFailure {
             var detail = result.stderr.isEmpty ? result.stdout : result.stderr
             if case .log(let url) = mode { detail = "Last lines of \(url.path):\n" + detail }
@@ -135,5 +146,51 @@ public struct Shell: Sendable {
         args.map { arg in
             arg.range(of: #"^[A-Za-z0-9_./:=,+@%-]+$"#, options: .regularExpression) != nil ? arg : "'" + arg.replacingOccurrences(of: "'", with: "'\\''") + "'"
         }.joined(separator: " ")
+    }
+}
+
+/// Runs a program on this terminal in launchseq's own process group, which is the
+/// terminal's foreground group. `Process` starts children in a new group, so a
+/// full-screen editor like vi is stopped by SIGTTOU and never appears.
+enum ForegroundSpawn {
+    static func run(_ executable: URL, arguments: [String], cwd: URL?, environment: [String: String]) throws -> Int32 {
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        // The child gets default Ctrl-C handling even though launchseq ignores it meanwhile.
+        var defaults = sigset_t()
+        sigemptyset(&defaults); sigaddset(&defaults, SIGINT); sigaddset(&defaults, SIGQUIT)
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGDEF))
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        if let cwd { posix_spawn_file_actions_addchdir_np(&actions, cwd.path) }
+
+        let argv = ([executable.path] + arguments).map { strdup($0) } + [nil]
+        let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { (argv + envp).forEach { free($0) } }
+
+        // Like system(3): Ctrl-C goes to the editor, not launchseq, while it's open.
+        let oldInt = signal(SIGINT, SIG_IGN), oldQuit = signal(SIGQUIT, SIG_IGN)
+        defer { signal(SIGINT, oldInt); signal(SIGQUIT, oldQuit) }
+
+        var pid: pid_t = 0
+        let rc = posix_spawn(&pid, executable.path, &actions, &attr, argv, envp)
+        guard rc == 0 else { throw LaunchError.command("Couldn't start \(executable.lastPathComponent): \(String(cString: strerror(rc)))") }
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) == -1 {
+            guard errno == EINTR else { throw LaunchError.command("Lost track of \(executable.lastPathComponent): \(String(cString: strerror(errno)))") }
+        }
+        let signalled = status & 0x7f
+        if signalled == SIGINT { throw LaunchError.aborted("\(executable.lastPathComponent) was stopped with Ctrl-C") }
+        return signalled == 0 ? (status >> 8) & 0xff : 128 + signalled
+    }
+
+    /// Whether launchseq can hand this terminal to a child: stdin is a terminal and
+    /// launchseq is in its foreground group.
+    static var ownsTerminal: Bool {
+        isatty(STDIN_FILENO) != 0 && tcgetpgrp(STDIN_FILENO) == getpgrp()
     }
 }

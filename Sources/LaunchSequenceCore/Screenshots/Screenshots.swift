@@ -63,10 +63,14 @@ public struct ScreenshotCapture: Sendable {
             }
             console.step("\(device.name): \(sim.name) (\(device.simulator.os))")
             if let before = device.before {
-                if shell.dryRun { console.dry("ask you to: \(before)") } else { try console.pause(before) }
+                if shell.dryRun { console.dry("ask you to: \(before)") }
+                else { try console.pause(before, acknowledgement: "Got it, capturing \(device.name)…") }
             }
-            try shell.change(["xcrun", "simctl", "boot", sim.udid], allowFailure: true)
-            try shell.change(["xcrun", "simctl", "bootstatus", sim.udid, "-b"])
+            console.info("Booting \(sim.name)…")
+            try console.whileWorking("booting \(sim.name)") {
+                try shell.change(["xcrun", "simctl", "boot", sim.udid], allowFailure: true)
+                try shell.change(["xcrun", "simctl", "bootstatus", sim.udid, "-b"])
+            }
             try shell.change(["xcrun", "simctl", "status_bar", sim.udid, "override"] + device.statusBar, allowFailure: true)
             let app = try SafePath.resolve(device.app, under: products)
             if !shell.dryRun && !fm.fileExists(atPath: app.path) {
@@ -82,7 +86,8 @@ public struct ScreenshotCapture: Sendable {
                 guard let lang = config.language(code: code) else { continue }
                 let folder = rawRoot.appendingPathComponent(code).appendingPathComponent(device.name)
                 if !shell.dryRun { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
-                for scene in shots.scenes {
+                for (n, scene) in shots.scenes.enumerated() {
+                    if !shell.dryRun { console.info("Capturing \(code)/\(device.name)/\(scene.name) (\(n + 1)/\(shots.scenes.count))") }
                     try shell.change(["xcrun", "simctl", "terminate", sim.udid, device.bundleId], allowFailure: true)
                     try shell.change(["xcrun", "simctl", "launch", sim.udid, device.bundleId, "-AppleLanguages", "(\(lang.code))", "-AppleLocale", lang.locale] + scene.args)
                     if !shell.dryRun { sleep(device.settleSeconds) }
