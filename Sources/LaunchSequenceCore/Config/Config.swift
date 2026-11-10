@@ -344,9 +344,11 @@ public struct ScreenshotsSection: Codable, Sendable, Equatable {
     public var devices: [Device]
     /// App hook that frames `raw_dir` into `output_dir`. Run with LAUNCHSEQ_RAW_DIR / LAUNCHSEQ_OUTPUT_DIR set.
     public var render: [String]?
+    /// How liftoff gets the framed screenshots into App Store Connect.
+    public var upload: ScreenshotUpload
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case rawDir = "raw_dir", outputDir = "output_dir", builds, scenes, devices, render
+        case rawDir = "raw_dir", outputDir = "output_dir", builds, scenes, devices, render, upload
     }
     public init(from decoder: Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
@@ -357,8 +359,13 @@ public struct ScreenshotsSection: Codable, Sendable, Equatable {
         scenes = try c.decode([Scene].self, forKey: .scenes)
         devices = try c.decode([Device].self, forKey: .devices)
         render = try c.decodeIfPresent([String].self, forKey: .render)
+        upload = try c.decodeIfPresent(ScreenshotUpload.self, forKey: .upload) ?? .api
     }
 }
+
+/// `api`: liftoff uploads each set itself. `manual`: you drag each set into App Store
+/// Connect, and liftoff checks the result against the local files.
+public enum ScreenshotUpload: String, Codable, Sendable, Equatable { case api, manual }
 
 public struct AppStoreSection: Codable, Sendable, Equatable {
     public var bundleId: String

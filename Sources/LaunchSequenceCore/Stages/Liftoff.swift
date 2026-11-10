@@ -6,6 +6,8 @@ public struct Liftoff: Sendable {
     public struct Options: Sendable {
         public var force = false
         public var skipWebsite = false
+        /// Drag the screenshots into App Store Connect yourself, whatever the config says.
+        public var manualScreenshots = false
         public init() {}
     }
 
@@ -111,24 +113,24 @@ public struct Liftoff: Sendable {
         let locIDs = try await asc.syncVersionLocalizations(versionID: ascVersion.id, metadata: metadata, isFirstVersion: isFirst, readFrom: ascVersion.previewFrom)
 
         var shotSummary: [String] = []
-        if let shots = config.screenshots {
-            console.step("Screenshots")
+        if config.screenshots != nil {
+            let manual = options.manualScreenshots || config.screenshots?.upload == .manual
+            console.step("Screenshots\(manual ? " (you drag them in, liftoff checks them)" : "")")
+            if manual { console.info("App Store Connect: https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight") }
             for language in config.languages {
                 guard let locale = language.ascLocale else { continue }
                 // Devices that share a display type (e.g. a foldable's folded and unfolded
                 // captures) fill one App Store slot, in the order the config lists them.
                 for group in ScreenshotValidator.slots(config: config, language: language.code) {
-                    var locals: [AppStoreConnect.LocalScreenshot] = []
-                    for device in group.devices {
-                        for file in try ScreenshotValidator.files(config: config, root: ctx.root, language: language.code, device: device) {
-                            locals.append(.init(fileName: file.lastPathComponent, data: try Data(contentsOf: file)))
-                        }
-                    }
+                    let locals = try slotFiles(language: language.code, group: group, renameForUpload: manual)
                     guard !locals.isEmpty else { continue }
                     let locID = locIDs[locale] ?? "dryrun-loc-\(locale)"
-                    switch try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals, label: "\(locale) \(group.displayType)") {
+                    let result = manual
+                        ? try await placeByHand(asc: asc, localizationID: locID, locale: locale, group: group, files: locals)
+                        : try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals, label: "\(locale) \(group.displayType)")
+                    switch result {
                     case .unchanged: console.ok("\(locale) \(group.displayType): unchanged")
-                    case .replaced(let n): console.ok("\(locale) \(group.displayType): uploaded \(n)")
+                    case .replaced(let n): console.ok("\(locale) \(group.displayType): \(manual ? "your \(n) match the local files" : "uploaded \(n)")")
                     }
                     shotSummary.append("\(locale) \(group.displayType): \(locals.count)")
                 }
@@ -167,6 +169,75 @@ public struct Liftoff: Sendable {
         console.info("Release:      \(config.appStore.releaseType.lowercased().replacingOccurrences(of: "_", with: " ")), phased \(config.appStore.phasedRelease ? "on" : "off")")
         console.info("Check it, then press Submit for Review yourself:")
         console.info("https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight")
+    }
+
+    /// The framed screenshots for one App Store slot, in upload order. When a slot is filled
+    /// from several devices (a foldable's two captures), manual uploads are renamed
+    /// `1-<device>-<scene>.png` so the names don't clash and Finder lists them in order.
+    func slotFiles(language: String, group: ScreenshotValidator.Slot, renameForUpload: Bool) throws -> [AppStoreConnect.LocalScreenshot] {
+        var files: [AppStoreConnect.LocalScreenshot] = []
+        for (i, device) in group.devices.enumerated() {
+            for file in try ScreenshotValidator.files(config: config, root: ctx.root, language: language, device: device) {
+                let name = renameForUpload && group.devices.count > 1 ? "\(i + 1)-\(device.name)-\(file.lastPathComponent)" : file.lastPathComponent
+                files.append(.init(fileName: name, data: try Data(contentsOf: file)))
+            }
+        }
+        return files
+    }
+
+    /// Copies one slot's files into their own folder, `build/launchseq/upload/<locale>/<display type>`,
+    /// so they can be dragged in together.
+    func stage(_ files: [AppStoreConnect.LocalScreenshot], locale: String, displayType: String) throws -> URL {
+        let folder = try SafePath.resolve("build/launchseq/upload/\(locale)/\(displayType)", under: ctx.root)
+        try? FileManager.default.removeItem(at: folder)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for file in files { try file.data.write(to: folder.appendingPathComponent(file.fileName)) }
+        return folder
+    }
+
+    /// Manual mode: asks you to drag one slot's screenshots into App Store Connect, then checks
+    /// them against the local files until they match and Apple has processed them.
+    func placeByHand(asc: AppStoreConnect, localizationID: String, locale: String, group: ScreenshotValidator.Slot,
+                     files: [AppStoreConnect.LocalScreenshot]) async throws -> AppStoreConnect.ScreenshotResult {
+        let slot = "\(locale) \(group.displayType)"
+        let check = { try await asc.checkScreenshots(localizationID: localizationID, displayType: group.displayType, files: files) }
+        var state = try await check()
+        if state == .matches { return .unchanged }
+        let devices = group.devices.map(\.name).joined(separator: " + ")
+        if ctx.dryRun {
+            console.dry("ask you to drag \(files.count) screenshots into \(slot) (\(devices)), then check them")
+            return .unchanged
+        }
+        let folder = try stage(files, locale: locale, displayType: group.displayType)
+        if case .different = state {
+            try ctx.shell.change(["open", folder.path], allowFailure: true)
+            let list = files.enumerated().map { "       \($0.offset + 1). \($0.element.fileName)" }.joined(separator: "\n")
+            try console.pause("""
+                In App Store Connect, go to the \(locale) screenshots for \(group.displayType) (\(devices)). \
+                Delete any that are there, then drag in the \(files.count) files from the Finder window that just opened, in this order:
+                \(list)
+                     Folder: \(folder.path)
+                     Wait until they've all appeared in App Store Connect.
+                """, acknowledgement: "Got it, checking \(slot)…")
+        }
+        var waited = 0.0
+        while true {
+            state = try await check()
+            switch state {
+            case .matches:
+                return .replaced(files.count)
+            case .processing(let n):
+                if waited >= 30 * 60 {
+                    throw LaunchError.api("\(slot): \(n) screenshot\(n == 1 ? " is" : "s are") still processing after 30 minutes. Run liftoff again later; sets that match are skipped.")
+                }
+                if Int(waited) % 30 == 0 { console.info("… \(slot): \(files.count - n)/\(files.count) processed by Apple (\(Console.duration(waited)))") }
+                sleep(15); waited += 15
+            case .different(let problems):
+                console.warn("\(slot) doesn't match the local files yet:")
+                problems.forEach { console.info("      \($0)") }
+                try console.pause("Fix it in App Store Connect (the files are in \(folder.path)).", acknowledgement: "Got it, checking \(slot) again…")
+            }
+        }
     }
 
     /// Requires green CI on the release commit. Waits for checks to register and finish,

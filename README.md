@@ -137,6 +137,14 @@ launchseq liftoff
 
 Every step checks what's already there, so if liftoff stops partway (a network error, a slow build), run it again.
 
+### Uploading screenshots by hand
+
+Dragging screenshots into App Store Connect can be more reliable than uploading them through the API. To do it that way, set `upload: manual` in the `screenshots` section, or pass `--manual-screenshots` to liftoff. Liftoff then never uploads or deletes screenshots. For each locale and display type that doesn't already match the local files, it:
+
+1. Copies that slot's framed screenshots into `build/launchseq/upload/<locale>/<display type>/` and opens the folder in Finder. If a slot is filled from several devices, the files are renamed `1-<device>-<scene>.png`, `2-…`, so Finder lists them in upload order.
+2. Asks you to delete what's in that slot and drag the files in, in the order it lists.
+3. When you press Enter, checks the set against the local files: the same names in the same order, and the same images (by checksum, or file size if App Store Connect has no checksum). It lists anything that's wrong and asks you to fix it, then waits up to 30 minutes for Apple to finish processing.
+
 ## Safety
 
 - No secrets in config. API tokens live in memory only, are valid for 15 minutes, and are sent only to `api.appstoreconnect.apple.com`. Screenshot uploads go to Apple's pre-signed upload URLs, without the token.
