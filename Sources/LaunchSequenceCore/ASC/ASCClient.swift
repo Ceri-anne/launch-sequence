@@ -163,7 +163,19 @@ public final class ASCClient: @unchecked Sendable {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             }
             console.debug("\(method) \(url.path)\(url.query.map { "?\($0)" } ?? "")")
-            let (data, response) = try await transport.send(request)
+            let data: Data, response: HTTPURLResponse
+            do {
+                (data, response) = try await transport.send(request)
+            } catch {
+                guard Self.isTransient(error) else { throw error }
+                if Self.isSafeToRepeat(method) && attempt < 4 {
+                    let wait = pow(2, Double(attempt))
+                    console.debug("\(Self.describe(error)), retrying in \(Int(wait))s")
+                    await sleep(wait)
+                    continue
+                }
+                throw Self.networkFailure(method, url: url, error: error, attempts: attempt)
+            }
             let status = response.statusCode
             if (status == 429 || status >= 500) && attempt < 4 {
                 let wait = Double(response.value(forHTTPHeaderField: "Retry-After") ?? "") ?? pow(2, Double(attempt))
@@ -177,6 +189,39 @@ public final class ASCClient: @unchecked Sendable {
             if data.isEmpty || status == 204 { return .null }
             return try JSONValue.parse(data)
         }
+    }
+
+    /// Network failures where nothing came back, so trying again may well work.
+    static func isTransient(_ error: Error) -> Bool {
+        guard let e = error as? URLError else { return false }
+        switch e.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet,
+             .dnsLookupFailed, .cannotFindHost:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Methods that can be sent twice without doing anything twice. A POST that timed out
+    /// may still have been applied, so it isn't repeated.
+    static func isSafeToRepeat(_ method: String) -> Bool { method == "GET" || method == "PATCH" || method == "PUT" }
+
+    static func describe(_ error: Error) -> String {
+        guard let e = error as? URLError else { return String(describing: error) }
+        switch e.code {
+        case .timedOut: return "The request timed out"
+        case .networkConnectionLost: return "The network connection was lost"
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed: return "Couldn't reach the server"
+        case .notConnectedToInternet: return "Not connected to the internet"
+        default: return "Network error \(e.code.rawValue)"
+        }
+    }
+
+    static func networkFailure(_ method: String, url: URL, error: Error, attempts: Int) -> LaunchError {
+        let tries = attempts > 1 ? " after \(attempts) tries" : ""
+        let hint = isSafeToRepeat(method) ? "" : ". It may have gone through, so check before running again"
+        return .api("\(method) \(url.path) failed\(tries): \(describe(error))\(hint)")
     }
 
     static func errorDetail(_ data: Data) -> String {
@@ -225,7 +270,15 @@ public final class ASCClient: @unchecked Sendable {
         var attempt = 0
         while true {
             attempt += 1
-            let (_, response) = try await transport.send(request)
+            let response: HTTPURLResponse
+            do {
+                (_, response) = try await transport.send(request)
+            } catch {
+                // Each chunk covers a fixed byte range, so sending it again is harmless.
+                guard Self.isTransient(error) else { throw error }
+                if attempt < 3 { await sleep(Double(attempt * 2)); continue }
+                throw Self.networkFailure(op.method, url: op.url, error: error, attempts: attempt)
+            }
             if (200..<300).contains(response.statusCode) { return }
             if attempt < 3 { await sleep(Double(attempt * 2)); continue }
             throw LaunchError.api("Upload chunk failed with \(response.statusCode)")

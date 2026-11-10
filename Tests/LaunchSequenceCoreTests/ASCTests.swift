@@ -248,6 +248,60 @@ struct ASCTests {
         #expect(transport.requests.count == 3)
     }
 
+    @Test func retriesTimeoutsOnGets() async throws {
+        let counter = Counter()
+        let transport = RecordingTransport { _ in
+            if counter.increment() < 2 { throw URLError(.timedOut) }
+            return (try (["data": []] as JSONValue).data(), 200)
+        }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        _ = try await client.getAll("/v1/appStoreVersions/v1/appStoreVersionLocalizations")
+        #expect(transport.requests.count == 3)
+    }
+
+    @Test func givesUpOnTimeoutsWithAShortMessage() async throws {
+        let transport = RecordingTransport { _ in throw URLError(.timedOut) }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        do {
+            _ = try await client.get("/v1/apps")
+            Issue.record("expected a failure")
+        } catch let error as LaunchError {
+            #expect(transport.requests.count == 4)
+            #expect(error.description == "App Store Connect: GET /v1/apps failed after 4 tries: The request timed out")
+        }
+    }
+
+    @Test func doesNotRepeatPostsAfterATimeout() async throws {
+        let transport = RecordingTransport { _ in throw URLError(.timedOut) }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        do {
+            try await client.post("/v1/appStoreVersions", ["data": ["type": "appStoreVersions"]])
+            Issue.record("expected a failure")
+        } catch let error as LaunchError {
+            #expect(transport.requests.count == 1)
+            #expect(error.description.contains("may have gone through"))
+        }
+    }
+
+    @Test func doesNotRetryOtherErrors() async throws {
+        let transport = RecordingTransport { _ in throw URLError(.serverCertificateUntrusted) }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        await #expect(throws: URLError.self) { try await client.get("/v1/apps") }
+        #expect(transport.requests.count == 1)
+    }
+
+    @Test func retriesUploadChunksAfterAConnectionDrop() async throws {
+        let counter = Counter()
+        let transport = RecordingTransport { _ in
+            if counter.increment() < 1 { throw URLError(.networkConnectionLost) }
+            return (Data(), 200)
+        }
+        let client = ASCClient(credentials: testCredentials(), transport: transport, console: quietConsole, dryRun: false, sleep: { _ in })
+        let op = ASCClient.UploadOperation(method: "PUT", url: URL(string: "https://upload.example.apple.com/chunk")!, offset: 0, length: 3, headers: [])
+        try await client.upload(op, file: Data([1, 2, 3]))
+        #expect(transport.requests.count == 2)
+    }
+
     @Test func doesNotFollowNextLinksOffHost() async throws {
         let transport = RecordingTransport { _ in
             (try (["data": [], "links": ["next": "https://evil.example.com/v1/apps?cursor=x"]] as JSONValue).data(), 200)
