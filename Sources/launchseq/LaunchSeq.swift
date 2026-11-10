@@ -108,10 +108,14 @@ struct LiftoffCommand: AsyncParsableCommand {
     @Flag(help: "Don't publish the website pages.")
     var skipWebsite = false
 
+    @Flag(help: "Drag the screenshots into App Store Connect yourself; liftoff checks them. Same as `screenshots.upload: manual`.")
+    var manualScreenshots = false
+
     func run() async throws {
         var options = Liftoff.Options()
         options.force = force
         options.skipWebsite = skipWebsite
+        options.manualScreenshots = manualScreenshots
         try await Liftoff(ctx: try global.context(), options: options).run()
     }
 }

@@ -183,6 +183,58 @@ public struct AppStoreConnect: Sendable {
 
     public enum ScreenshotResult: Equatable, Sendable { case unchanged, replaced(Int) }
 
+    /// How a set in App Store Connect compares with the local files.
+    public enum SetCheck: Equatable, Sendable {
+        case matches
+        /// The right files, but Apple is still processing this many.
+        case processing(Int)
+        case different([String])
+    }
+
+    /// Compares one localization × display type's set with `files`, changing nothing.
+    public func checkScreenshots(localizationID: String, displayType: String, files: [LocalScreenshot]) async throws -> SetCheck {
+        let sets = try await client.getAll("/v1/appStoreVersionLocalizations/\(localizationID)/appScreenshotSets")
+        guard let setID = sets.first(where: { $0["attributes"]["screenshotDisplayType"].string == displayType })?["id"].string else {
+            return .different(["there are no screenshots here yet"])
+        }
+        return Self.compare(try await client.getAll("/v1/appScreenshotSets/\(setID)/appScreenshots"), with: files)
+    }
+
+    /// Same files in the same order: names match, and so do checksums (or, for an upload
+    /// that has no checksum, file sizes). Failed processing counts as different.
+    static func compare(_ remote: [JSONValue], with local: [LocalScreenshot]) -> SetCheck {
+        var problems: [String] = []
+        if remote.count != local.count {
+            problems.append("there \(remote.count == 1 ? "is" : "are") \(remote.count), and there should be \(local.count)")
+        }
+        let remoteNames = remote.map { $0["attributes"]["fileName"].string ?? "?" }
+        for (i, file) in local.enumerated() {
+            guard i < remote.count else { problems.append("\(file.fileName) is missing"); continue }
+            let shot = remote[i]["attributes"]
+            guard remoteNames[i] == file.fileName else {
+                problems.append(remoteNames.contains(file.fileName)
+                    ? "\(file.fileName) should be number \(i + 1), but it's number \(remoteNames.firstIndex(of: file.fileName)! + 1)"
+                    : "number \(i + 1) is \(remoteNames[i]), and it should be \(file.fileName)")
+                continue
+            }
+            if let checksum = shot["sourceFileChecksum"].string {
+                if checksum.lowercased() != file.md5 { problems.append("\(file.fileName) isn't the same image as the local file") }
+            } else if let size = shot["fileSize"].int, size != file.data.count {
+                problems.append("\(file.fileName) isn't the same size as the local file")
+            }
+        }
+        for extra in remoteNames.dropFirst(local.count) where !local.contains(where: { $0.fileName == extra }) {
+            problems.append("\(extra) shouldn't be there")
+        }
+        for shot in remote where shot["attributes"]["assetDeliveryState"]["state"].string == "FAILED" {
+            let errors = shot["attributes"]["assetDeliveryState"]["errors"].array.compactMap { $0["description"].string }
+            problems.append("\(shot["attributes"]["fileName"].string ?? "?") failed processing\(errors.isEmpty ? "" : ": " + errors.joined(separator: "; "))")
+        }
+        if !problems.isEmpty { return .different(problems) }
+        let processing = remote.filter { $0["attributes"]["assetDeliveryState"]["state"].string != "COMPLETE" }.count
+        return processing == 0 ? .matches : .processing(processing)
+    }
+
     /// Makes the set for one localization × display type match `files` exactly, in order.
     /// If it already matches (same file names and checksums, all processed), nothing changes.
     public func syncScreenshots(localizationID: String, displayType: String, files: [LocalScreenshot], label: String? = nil) async throws -> ScreenshotResult {
