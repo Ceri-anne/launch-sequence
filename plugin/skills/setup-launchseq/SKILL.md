@@ -65,7 +65,7 @@ Run `launchseq doctor`. Commit on the branch and open a PR. The PR body lists wh
 
 Then tell the person what only they can do:
 
-- In App Store Connect, the Xcode Cloud **Release** workflow's start condition must be a tag change matching `*.*.*`.
+- The Xcode Cloud **Release** workflow: start condition **Tag Changes → Any Tags** (Custom Tags only take exact names or a prefix, so `*.*.*` never matches), plus **Manual Start → Tag** for building a missed tag by hand, and an **Archive** action with Distribution Preparation **TestFlight and App Store**. Set it up in Xcode (Integrate → Manage Workflows), because the web editor can't list schemes from a gitignored, generated project.
 - `ANTHROPIC_API_KEY` translates release notes. Without it, countdown stops at `TODO` placeholders that have to be translated by hand.
 - Any screenshot hook, script change or copy retirement you deliberately left out.
 
