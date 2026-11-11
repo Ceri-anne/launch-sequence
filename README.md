@@ -94,7 +94,10 @@ By hand:
 
    If the copy lives in Markdown with headings like `### Subtitle (max 30)` and a fenced block under each, `launchseq migrate-copy Copy.md:en Copy-Localized.md` converts it. It leaves out "What's New", because that belongs to one release: the next countdown drafts it.
 3. Put the support, privacy and accessibility pages in the folder `website.source` names. That folder is the source, and the website copy is the output.
-4. In App Store Connect, make sure the Xcode Cloud **Release** workflow's start condition is a tag change matching `*.*.*`.
+4. Set up the Xcode Cloud **Release** workflow that `liftoff`'s tag push starts. Edit it in Xcode (Integrate → Manage Workflows), not the App Store Connect web editor: when the `.xcodeproj` is generated and gitignored, the web editor can't list the schemes.
+   - Start condition: **Tag Changes** with **Any Tags**. Custom Tags only take exact tag names or a prefix such as `release/*`, so a glob like `*.*.*` is read as one literal tag name and never matches. Any Tags is safe as long as `liftoff` is the only thing that pushes tags.
+   - Add a second start condition, **Manual Start → Tag**. A tag that was pushed before the trigger worked doesn't build when you fix it, and this lets you build it by hand (Start Build, pick the tag) instead of re-pushing it. `liftoff` waits for that build and attaches it.
+   - Action: **Archive** for iOS, with Distribution Preparation set to **TestFlight and App Store**. A build prepared for internal testing only can't be submitted for review.
 5. Run `launchseq doctor`.
 
 ## Countdown
