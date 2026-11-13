@@ -36,6 +36,9 @@ public struct Console: Sendable {
     public func warn(_ text: String) { write("  ⚠️  \(text)") }
     public func info(_ text: String) { write("    \(text)") }
     public func dry(_ text: String) { write("  [dry run] would: \(text)") }
+    /// A ✓ for a change that has been made. In a dry run the change was only previewed
+    /// (its `[dry run] would:` line is already printed), so nothing is printed.
+    public func done(_ text: String, dryRun: Bool) { if !dryRun { ok(text) } }
     public func debug(_ text: String) { if verbose { write("    \u{1B}[2m\(text)\u{1B}[0m") } }
 
     /// Asks a yes/no question; the default is no. `--yes` answers yes. Without a terminal

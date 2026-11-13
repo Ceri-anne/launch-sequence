@@ -90,10 +90,10 @@ public struct AppStoreConnect: Sendable {
                     "relationships": ["appStoreVersion": ["data": ["type": "appStoreVersions", "id": .string(versionID)]]],
                 ],
             ])
-            console.ok("Phased release on")
+            console.done("Phased release on", dryRun: client.dryRun)
         case (false, let id?):
             try await client.delete("/v1/appStoreVersionPhasedReleases/\(id)")
-            console.ok("Phased release off")
+            console.done("Phased release off", dryRun: client.dryRun)
         default:
             console.ok("Phased release already \(enabled ? "on" : "off")")
         }
@@ -121,7 +121,7 @@ public struct AppStoreConnect: Sendable {
                 let changed = attrs.filter { loc["attributes"][$0.key] != $0.value }
                 if changed.isEmpty { console.ok("\(m.locale): version copy already up to date"); continue }
                 try await client.patch("/v1/appStoreVersionLocalizations/\(id)", ["data": ["type": "appStoreVersionLocalizations", "id": .string(id), "attributes": .object(changed)]])
-                console.ok("\(m.locale): updated \(changed.keys.sorted().joined(separator: ", "))")
+                console.done("\(m.locale): updated \(changed.keys.sorted().joined(separator: ", "))", dryRun: client.dryRun)
             } else {
                 attrs["locale"] = .string(m.locale)
                 let created = try await client.post("/v1/appStoreVersionLocalizations", [
@@ -132,7 +132,7 @@ public struct AppStoreConnect: Sendable {
                     ],
                 ])
                 ids[m.locale] = created["data"]["id"].string
-                console.ok("\(m.locale): added localization")
+                console.done("\(m.locale): added localization", dryRun: client.dryRun)
             }
         }
         return ids
@@ -157,7 +157,7 @@ public struct AppStoreConnect: Sendable {
                 let changed = attrs.filter { loc["attributes"][$0.key] != $0.value }
                 if changed.isEmpty { continue }
                 try await client.patch("/v1/appInfoLocalizations/\(id)", ["data": ["type": "appInfoLocalizations", "id": .string(id), "attributes": .object(changed)]])
-                console.ok("\(m.locale): updated \(changed.keys.sorted().joined(separator: ", "))")
+                console.done("\(m.locale): updated \(changed.keys.sorted().joined(separator: ", "))", dryRun: client.dryRun)
             } else {
                 attrs["locale"] = .string(m.locale)
                 try await client.post("/v1/appInfoLocalizations", [
@@ -167,7 +167,7 @@ public struct AppStoreConnect: Sendable {
                         "relationships": ["appInfo": ["data": ["type": "appInfos", "id": .string(infoID)]]],
                     ],
                 ])
-                console.ok("\(m.locale): added app info localization")
+                console.done("\(m.locale): added app info localization", dryRun: client.dryRun)
             }
         }
     }
@@ -377,7 +377,7 @@ public struct AppStoreConnect: Sendable {
         let current = try await client.get("/v1/appStoreVersions/\(versionID)/relationships/build")
         if current["data"]["id"].string == buildID { console.ok("Build already attached"); return }
         try await client.patch("/v1/appStoreVersions/\(versionID)/relationships/build", ["data": ["type": "builds", "id": .string(buildID)]])
-        console.ok("Attached build")
+        console.done("Attached build", dryRun: client.dryRun)
     }
 
     /// Sets TestFlight "What to Test" for each locale.
@@ -397,7 +397,7 @@ public struct AppStoreConnect: Sendable {
                 ])
             }
         }
-        console.ok("TestFlight What to Test set for \(notes.count) locale\(notes.count == 1 ? "" : "s")")
+        console.done("TestFlight What to Test set for \(notes.count) locale\(notes.count == 1 ? "" : "s")", dryRun: client.dryRun)
     }
 
     /// Whether any version has been released before (What's New can't be set on a first version).

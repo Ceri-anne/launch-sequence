@@ -203,6 +203,15 @@ public struct GitHub: Sendable {
         try shell.read(["gh", "release", "view", tag, "--json", "tagName"], allowFailure: true).status == 0
     }
 
+    public enum ReleaseState: Equatable, Sendable { case missing, draft, published }
+
+    /// Whether the release for `tag` exists, and if so whether it's still a draft.
+    public func releaseState(_ tag: String) throws -> ReleaseState {
+        let result = try shell.read(["gh", "release", "view", tag, "--json", "isDraft", "-q", ".isDraft"], allowFailure: true)
+        guard result.status == 0 else { return .missing }
+        return result.trimmed == "false" ? .published : .draft
+    }
+
     public func createDraftRelease(tag: String, notes: String) throws {
         try shell.change(["gh", "release", "create", tag, "--draft", "--verify-tag", "--title", tag, "--notes", notes, "--generate-notes"])
     }
