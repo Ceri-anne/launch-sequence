@@ -37,10 +37,12 @@ final class FakeSimctl: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var images: [Data]
     private(set) var screenshots = 0
+    private(set) var commands: [[String]] = []
     init(_ images: [Data]) { self.images = images }
 
     func run(_ arguments: [String], cwd: URL?, environment: [String: String], mode: OutputMode) throws -> CommandResult {
         lock.lock(); defer { lock.unlock() }
+        commands.append(arguments)
         if arguments.starts(with: ["xcrun", "simctl", "list"]) {
             let json = #"{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-27-2": [{"name": "iPhone 17 Pro", "udid": "U1", "isAvailable": true}]}}"#
             return CommandResult(status: 0, stdout: json, stderr: "")

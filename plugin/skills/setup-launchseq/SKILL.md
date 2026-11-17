@@ -32,7 +32,7 @@ Run `launchseq init --dry-run`, read the draft and its warnings, then run `launc
 - **app_store.ci_workflow**: the Xcode Cloud workflow that builds `main` and reports checks to GitHub. Liftoff offers to start it when no checks report on the release commit. Set it if the workflow isn't called `Main`.
 - **privacy_sensitive_paths**: the code that decides what data the app stores, syncs or sends, plus entitlements and `Info.plist`.
 
-**Done when** `launchseq doctor --offline` has no config errors. Missing copy is fine at this point, because that's step 3.
+**Done when** `launchseq doctor --offline --skip-capture` has no config errors. Missing copy is fine at this point, because that's step 3.
 
 ## 3. Move the App Store copy into metadata files
 
@@ -61,12 +61,13 @@ Skip this if step 1 found them. Otherwise reuse the key the repo already signs w
 
 ## 6. Hand off
 
-Run `launchseq doctor`. Commit on the branch and open a PR. The PR body lists what was migrated, and what was left for a separate change.
+Run `launchseq doctor`. Its screen capture check fails from a sandboxed shell, because `simctl io screenshot` returns blank frames there. If it fails for you, rerun with `--skip-capture` and ask the person to run `launchseq doctor` in their own terminal. Commit on the branch and open a PR. The PR body lists what was migrated, and what was left for a separate change.
 
 Then tell the person what only they can do:
 
 - The Xcode Cloud **Release** workflow: start condition **Tag Changes → Any Tags** (Custom Tags only take exact names or a prefix, so `*.*.*` never matches), plus **Manual Start → Tag** for building a missed tag by hand, and an **Archive** action with Distribution Preparation **TestFlight and App Store**. Set it up in Xcode (Integrate → Manage Workflows), because the web editor can't list schemes from a gitignored, generated project.
 - `ANTHROPIC_API_KEY` translates release notes. Without it, countdown stops at `TODO` placeholders that have to be translated by hand.
+- Running `launchseq doctor` in their own terminal, if its screen capture check failed in yours.
 - Any screenshot hook, script change or copy retirement you deliberately left out.
 
 **Done when** doctor reports **Ready**, the PR is open, and every remaining doctor warning is either fixed or named in the hand-off with its reason.
