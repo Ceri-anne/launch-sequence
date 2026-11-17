@@ -2,7 +2,7 @@
 
 Fixes and improvements that came out of releasing Prime Time 1.2.0 (items 1–8) and Bigger or Smaller 1.1.0 (items 9–13) with launchseq. Each item names the problem we actually hit, then the change.
 
-Suggested order for what's left: **10 → 11 → 5 → 8 → 9 → 6 → 7**. 10 and 11 stop blank screenshots from being committed and uploaded. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
+Suggested order for what's left: **11 → 5 → 8 → 9 → 6 → 7**. 11 reuses item 10's blank check. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
 
 ## 1. Wait longer for screenshot processing, with progress
 
@@ -101,6 +101,8 @@ Suggested order for what's left: **10 → 11 → 5 → 8 → 9 → 6 → 7**. 10
   - Liftoff attaches the newest build from after the retag, not the older one.
 
 ## 10. Catch blank screenshot captures (countdown)
+
+**Status:** done, not yet released. `BlankCapture.isBlank` samples the capture (nearest-neighbour, so thin text survives), ignores the top 7% and calls it blank when over 99% of pixels are within 10 of the most common colour. A blank capture is retaken up to twice, `settle_seconds` apart; after that the file is removed and countdown stops. The default `settle_seconds` stays at 3, since the retries now cover slow screens.
 
 **Problem:** the first captures of a freshly installed app were the empty app background: the screen had drawn nothing by the default 3-second `settle_seconds`. The warm-up launch didn't help for screens that do more work (a scripted reveal, a summary). Countdown would have framed those blanks, committed them to the release PR, and liftoff would have uploaded them. Bigger or Smaller now sets `warmup_seconds: 5` and `settle_seconds: 5`.
 

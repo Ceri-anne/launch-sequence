@@ -93,13 +93,37 @@ public struct ScreenshotCapture: Sendable {
                     if !shell.dryRun { sleep(device.settleSeconds) }
                     var args = ["xcrun", "simctl", "io", sim.udid, "screenshot"]
                     if let display = device.display { args.append("--display=\(display)") }
-                    args.append(folder.appendingPathComponent("\(scene.name).png").path)
+                    let file = folder.appendingPathComponent("\(scene.name).png")
+                    args.append(file.path)
                     try shell.change(args)
+                    if !shell.dryRun { try retryIfBlank(file, args: args, what: "\(code)/\(device.name)/\(scene.name)", device: device) }
                 }
                 console.ok("\(code)/\(device.name): \(shots.scenes.count) \(shell.dryRun ? "to capture" : "captured")")
             }
             try shell.change(["xcrun", "simctl", "terminate", sim.udid, device.bundleId], allowFailure: true)
         }
+    }
+
+    /// How many more captures are taken when one comes out blank.
+    static let blankRetries = 2
+
+    /// A capture taken before the app has drawn is just its background. Waits
+    /// `settle_seconds` again and recaptures, then fails rather than keep a blank.
+    func retryIfBlank(_ file: URL, args: [String], what: String, device: Device) throws {
+        for retry in 0...Self.blankRetries {
+            guard let data = FileManager.default.contents(atPath: file.path), BlankCapture.isBlank(data) else { return }
+            if retry == Self.blankRetries { break }
+            console.warn("\(what) looks blank (nearly one colour). Waiting \(Console.duration(device.settleSeconds)) and capturing again (\(retry + 1)/\(Self.blankRetries)).")
+            sleep(device.settleSeconds)
+            try shell.change(args)
+        }
+        try? FileManager.default.removeItem(at: file)
+        throw LaunchError.precondition("""
+            \(what) on \(device.simulator.name) was still blank after \(Self.blankRetries + 1) captures, so it's been removed. \
+            The app hadn't drawn anything yet: raise `settle_seconds` for \(device.name) (it's \(Console.duration(device.settleSeconds))), \
+            or `warmup_seconds` if it's the first scene. If every capture is blank, even of other apps, screen capture \
+            isn't working from this shell: run launchseq from a normal terminal.
+            """)
     }
 
     public func render() throws {
