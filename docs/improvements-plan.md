@@ -2,7 +2,7 @@
 
 Fixes and improvements that came out of releasing Prime Time 1.2.0 (items 1–8) and Bigger or Smaller 1.1.0 (items 9–13) with launchseq. Each item names the problem we actually hit, then the change.
 
-Suggested order for what's left: **12 → 13 → 10 → 11 → 5 → 8 → 9 → 6 → 7**. 12 and 13 are small output fixes. 10 and 11 stop blank screenshots from being committed and uploaded. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
+Suggested order for what's left: **10 → 11 → 5 → 8 → 9 → 6 → 7**. 10 and 11 stop blank screenshots from being committed and uploaded. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
 
 ## 1. Wait longer for screenshot processing, with progress
 
@@ -120,12 +120,16 @@ Suggested order for what's left: **12 → 13 → 10 → 11 → 5 → 8 → 9 →
 
 ## 12. Say when screenshots are skipped (liftoff)
 
+**Status:** done, not yet released.
+
 **Problem:** for a config with no `screenshots:` section, liftoff skips the screenshot step without a word, so it looked as if it had uploaded them. The person assumed launchseq had handled them.
 
 - When `config.screenshots` is nil, print `Screenshots: skipped (no screenshots: section in .launchseq.yml; App Store Connect keeps the previous version's)`.
 - Add a `Screenshots: not managed` line to the "Ready for review" summary.
 
 ## 13. Accurate GitHub release messages (liftoff)
+
+**Status:** done, not yet released. The ✓ fix also covers liftoff's App Store Connect steps (copy, phased release, attaching the build, What to Test, screenshot uploads).
 
 **Problem:** on a rerun, where the release was already published, liftoff printed `[dry run] would: gh release edit 1.1.0 --draft=false --latest` followed by `✓ Published GitHub release 1.1.0`. In a dry run that reads as if publishing happened, and either way nothing needed doing.
 

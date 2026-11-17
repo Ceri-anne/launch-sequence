@@ -112,8 +112,11 @@ public struct Liftoff: Sendable {
         try await asc.syncAppInfoLocalizations(appID: appID, metadata: metadata)
         let locIDs = try await asc.syncVersionLocalizations(versionID: ascVersion.id, metadata: metadata, isFirstVersion: isFirst, readFrom: ascVersion.previewFrom)
 
-        var shotSummary: [String] = []
-        if config.screenshots != nil {
+        var shotSummary: [String]? = nil
+        if config.screenshots == nil {
+            console.step(Self.screenshotsSkipped)
+        } else {
+            shotSummary = []
             let manual = options.manualScreenshots || config.screenshots?.upload == .manual
             console.step("Screenshots\(manual ? " (you drag them in, liftoff checks them)" : "")")
             if manual { console.info("App Store Connect: https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight") }
@@ -130,9 +133,9 @@ public struct Liftoff: Sendable {
                         : try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals, label: "\(locale) \(group.displayType)")
                     switch result {
                     case .unchanged: console.ok("\(locale) \(group.displayType): unchanged")
-                    case .replaced(let n): console.ok("\(locale) \(group.displayType): \(manual ? "your \(n) match the local files" : "uploaded \(n)")")
+                    case .replaced(let n): console.done("\(locale) \(group.displayType): \(manual ? "your \(n) match the local files" : "uploaded \(n)")", dryRun: ctx.dryRun)
                     }
-                    shotSummary.append("\(locale) \(group.displayType): \(locals.count)")
+                    shotSummary?.append("\(locale) \(group.displayType): \(locals.count)")
                 }
             }
         }
@@ -153,22 +156,43 @@ public struct Liftoff: Sendable {
         }
 
         // 6. Publish the GitHub release now there's a build behind it.
-        if !ctx.dryRun || tagExists {
-            try ctx.github.publishRelease(tag: tag)
-            console.ok("Published GitHub release \(tag)")
-        } else {
-            console.dry("publish the GitHub release \(tag)")
-        }
+        try publishGitHubRelease(tag)
         state.mark("liftoff"); try state.save(gitDir: gitDir, dryRun: ctx.dryRun)
 
         // 7. Summary. Submission is left to the person.
         console.stage("Ready for review: \(config.app.name) \(tag)")
-        console.info("Build:        \(buildNumber)")
-        console.info("Locales:      \(metadata.map(\.locale).joined(separator: ", "))")
-        if !shotSummary.isEmpty { console.info("Screenshots:  \(shotSummary.joined(separator: ", "))") }
-        console.info("Release:      \(config.appStore.releaseType.lowercased().replacingOccurrences(of: "_", with: " ")), phased \(config.appStore.phasedRelease ? "on" : "off")")
-        console.info("Check it, then press Submit for Review yourself:")
-        console.info("https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight")
+        summary(build: buildNumber, locales: metadata.map(\.locale), screenshots: shotSummary, appID: appID).forEach(console.info)
+    }
+
+    static let screenshotsSkipped = "Screenshots: skipped (no screenshots: section in .launchseq.yml; App Store Connect keeps the previous version's)"
+
+    /// The "Ready for review" lines. `screenshots` is nil when the config doesn't manage them.
+    func summary(build: String, locales: [String], screenshots: [String]?, appID: String) -> [String] {
+        var lines = ["Build:        \(build)", "Locales:      \(locales.joined(separator: ", "))"]
+        switch screenshots {
+        case nil: lines.append("Screenshots:  not managed")
+        case let slots? where !slots.isEmpty: lines.append("Screenshots:  \(slots.joined(separator: ", "))")
+        default: break
+        }
+        lines.append("Release:      \(config.appStore.releaseType.lowercased().replacingOccurrences(of: "_", with: " ")), phased \(config.appStore.phasedRelease ? "on" : "off")")
+        lines.append("Check it, then press Submit for Review yourself:")
+        lines.append("https://appstoreconnect.apple.com/apps/\(appID)/distribution/ios/version/inflight")
+        return lines
+    }
+
+    /// Takes the GitHub release out of draft, unless it's already published. In a dry run
+    /// the edit is only previewed, so there's no ✓.
+    func publishGitHubRelease(_ tag: String) throws {
+        switch try ctx.github.releaseState(tag) {
+        case .published:
+            console.ok("GitHub release \(tag) already published")
+        case .missing where ctx.dryRun:
+            // The dry run only previewed creating the draft.
+            console.dry("publish the GitHub release \(tag)")
+        case .draft, .missing:
+            try ctx.github.publishRelease(tag: tag)
+            console.done("Published GitHub release \(tag)", dryRun: ctx.dryRun)
+        }
     }
 
     /// The framed screenshots for one App Store slot, in upload order. When a slot is filled
