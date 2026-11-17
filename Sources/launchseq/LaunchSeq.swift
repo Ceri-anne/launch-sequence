@@ -108,6 +108,9 @@ struct LiftoffCommand: AsyncParsableCommand {
     @Flag(help: "Don't publish the website pages.")
     var skipWebsite = false
 
+    @Flag(help: "Leave App Store Connect's screenshots as they are. Every locale keeps the ones it already has.")
+    var skipScreenshots = false
+
     @Flag(help: "Drag the screenshots into App Store Connect yourself; liftoff checks them. Same as `screenshots.upload: manual`.")
     var manualScreenshots = false
 
@@ -115,6 +118,7 @@ struct LiftoffCommand: AsyncParsableCommand {
         var options = Liftoff.Options()
         options.force = force
         options.skipWebsite = skipWebsite
+        options.skipScreenshots = skipScreenshots
         options.manualScreenshots = manualScreenshots
         try await Liftoff(ctx: try global.context(), options: options).run()
     }
