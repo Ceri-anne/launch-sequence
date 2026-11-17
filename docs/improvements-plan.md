@@ -2,7 +2,7 @@
 
 Fixes and improvements that came out of releasing Prime Time 1.2.0 (items 1–8) and Bigger or Smaller 1.1.0 (items 9–13) with launchseq. Each item names the problem we actually hit, then the change.
 
-Suggested order for what's left: **5 → 8 → 9 → 6 → 7**. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
+Suggested order for what's left: **8 → 9 → 6 → 7**. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
 
 ## 1. Wait longer for screenshot processing, with progress
 
@@ -40,6 +40,8 @@ Suggested order for what's left: **5 → 8 → 9 → 6 → 7**. PR 8 comes befor
 - **Website PR race.** The website PR's checks were reported as "failed" before any had registered, and the build then passed. Wait for checks to appear, and report "no checks" differently from "failed".
 
 ## 5. Doctor
+
+**Status:** done, not yet released. The Playwright check only runs when a file the render hook runs mentions `playwright`. Booting is skipped in a dry run and with `doctor --skip-capture`, and the Xcode Cloud check is a warning, since liftoff works without it. Only the Enter prompt named Simulator; it now says Device Hub.
 
 - Check that Playwright and Chromium are installed (`node -e "require('playwright')"`), and print the install command if they aren't: `npm install --no-save playwright && npx playwright install chromium`.
 - Warn if the App Store Connect key can't read the CI endpoints that PR 4 needs (`ciProducts`, `ciWorkflows`).

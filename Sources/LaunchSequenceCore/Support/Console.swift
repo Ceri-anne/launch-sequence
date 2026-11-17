@@ -64,7 +64,7 @@ public struct Console: Sendable {
         if assumeYes && !isInteractive {
             throw LaunchError.aborted("Manual step needed but no terminal: \(instruction)")
         }
-        write("  ✋ \(instruction)\n     Then click back into this terminal and press Enter (or type q to stop).\n     A key pressed in another window, like Simulator, doesn't reach launchseq.")
+        write("  ✋ \(instruction)\n     Then click back into this terminal and press Enter (or type q to stop).\n     A key pressed in another window, like Device Hub, doesn't reach launchseq.")
         if readLine()?.trimmingCharacters(in: .whitespaces).lowercased() == "q" {
             throw LaunchError.aborted("stopped at a manual step")
         }
