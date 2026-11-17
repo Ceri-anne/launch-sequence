@@ -128,7 +128,7 @@ struct DoctorCommand: AsyncParsableCommand {
     @Flag(help: "Don't contact App Store Connect.")
     var offline = false
 
-    @Flag(help: "Don't boot a simulator to check that screen capture works.")
+    @Flag(help: "Don't boot the screenshot simulators or take a test capture.")
     var skipCapture = false
 
     func run() async throws {

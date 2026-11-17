@@ -35,6 +35,8 @@ public struct Doctor: Sendable {
             catch { add(.fail, "\(tool) isn't installed or isn't on PATH") }
         }
 
+        if let check = playwrightCheck() { add(check.level, check.message) }
+
         if (try? ctx.github.authStatus()) == true { add(.pass, "gh is signed in") } else { add(.fail, "gh isn't signed in: run `gh auth login`") }
         if (try? ctx.git.isClean()) == true { add(.pass, "Working tree is clean") } else { add(.warn, "Working tree has uncommitted changes") }
 
@@ -56,7 +58,12 @@ public struct Doctor: Sendable {
                 if (try? Simulators.find(sim, in: Data(json.utf8))) ?? nil != nil { add(.pass, "Simulator \(sim.name) (\(sim.platform) \(sim.os))") }
                 else { add(.fail, "No simulator \(sim.name) on \(sim.platform) \(sim.os)") }
             }
-            if checkCapture, let check = captureCheck(listJSON: json) { add(check.level, check.message) }
+            if checkCapture {
+                let boots = bootChecks(listJSON: json)
+                boots.forEach { add($0.level, $0.message) }
+                // A capture from a simulator that won't boot would only repeat that failure.
+                if !boots.contains(where: { $0.level == .fail }), let check = captureCheck(listJSON: json) { add(check.level, check.message) }
+            }
         }
 
         // Copy
@@ -94,11 +101,73 @@ public struct Doctor: Sendable {
                 let asc = AppStoreConnect(client: client, console: ctx.console)
                 let id = try await asc.appID(bundleID: config.appStore.bundleId, configured: config.appStore.appId)
                 add(.pass, "App Store Connect app \(id) found for \(config.appStore.bundleId)")
+                let ci = await ciAccessCheck(client: client, appID: id)
+                add(ci.level, ci.message)
             } catch { add(.fail, "\(error)") }
         }
 
         let fails = checks.filter { $0.level == .fail }.count, warns = checks.filter { $0.level == .warn }.count
         ctx.console.stage(fails == 0 ? "Ready (\(warns) warning\(warns == 1 ? "" : "s"))" : "\(fails) problem\(fails == 1 ? "" : "s") to fix")
+        return checks
+    }
+
+    static let playwrightInstall = "npm install --no-save playwright && npx playwright install chromium"
+
+    /// When the render hook uses Playwright (a script it runs mentions it), checks that
+    /// Playwright and its Chromium are installed. Nil when the hook doesn't use it.
+    func playwrightCheck() -> Check? {
+        guard let hook = ctx.config.screenshots?.render, !hook.isEmpty else { return nil }
+        let usesPlaywright = hook.contains { arg in
+            guard let file = try? SafePath.resolve(arg, under: ctx.root),
+                  let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+            return text.contains("playwright")
+        }
+        guard usesPlaywright else { return nil }
+        let script = "const p = require('playwright').chromium.executablePath(); require('fs').accessSync(p)"
+        let result = try? ctx.shell.read(["node", "-e", script], allowFailure: true)
+        if result?.status == 0 { return Check(level: .pass, message: "Playwright and Chromium are installed for the render hook") }
+        let missingPackage = (result?.stderr ?? "").contains("Cannot find module")
+        return Check(level: .fail, message: "\(missingPackage ? "Playwright isn't installed" : "Playwright's Chromium isn't installed"), and the render hook needs it. Install it with:\n      \(Self.playwrightInstall)")
+    }
+
+    /// Whether the App Store Connect key can see the Xcode Cloud workflow liftoff starts
+    /// when CI hasn't built the release commit. Only ever a warning: liftoff works without it.
+    func ciAccessCheck(client: ASCClient, appID: String) async -> Check {
+        let name = ctx.config.appStore.ciWorkflow
+        do {
+            if try await XcodeCloud(client: client).workflow(appID: appID, named: name) != nil {
+                return Check(level: .pass, message: "Xcode Cloud workflow \(name) found")
+            }
+            return Check(level: .warn, message: "Xcode Cloud has no workflow called \(name). Set `app_store.ci_workflow` to the one that builds \(ctx.config.release.baseBranch), so liftoff can start it when CI hasn't run.")
+        } catch {
+            return Check(level: .warn, message: "The App Store Connect key can't read Xcode Cloud (ciProducts, ciWorkflows), so liftoff can't start a \(name) build when CI hasn't run: \((error as? LaunchError)?.description ?? error.localizedDescription)")
+        }
+    }
+
+    /// Boots every screenshot device's simulator, since one that exists can still fail to
+    /// boot (a broken runtime, not enough disk). Missing simulators are reported elsewhere.
+    func bootChecks(listJSON: String) -> [Check] {
+        guard let devices = ctx.config.screenshots?.devices else { return [] }
+        var seen = Set<String>(), checks: [Check] = []
+        for device in devices where seen.insert(device.simulator.destination).inserted {
+            guard let sim = (try? Simulators.find(device.simulator, in: Data(listJSON.utf8))) ?? nil else { continue }
+            if ctx.dryRun { ctx.console.dry("boot \(sim.name) (\(device.simulator.os))"); continue }
+            ctx.console.info("Booting \(sim.name) (\(device.simulator.os))…")
+            do {
+                let result = try ctx.console.whileWorking("booting \(sim.name)") { () throws -> CommandResult in
+                    try ctx.shell.change(["xcrun", "simctl", "boot", sim.udid], allowFailure: true)
+                    return try ctx.shell.change(["xcrun", "simctl", "bootstatus", sim.udid, "-b"], allowFailure: true)
+                }
+                if result.status == 0 {
+                    checks.append(Check(level: .pass, message: "Simulator \(sim.name) (\(device.simulator.os)) boots"))
+                } else {
+                    let why = (result.stderr.isEmpty ? result.stdout : result.stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+                    checks.append(Check(level: .fail, message: "Simulator \(sim.name) (\(device.simulator.os)) didn't boot\(why.isEmpty ? "" : ": \(why)")"))
+                }
+            } catch {
+                checks.append(Check(level: .fail, message: "Simulator \(sim.name) (\(device.simulator.os)) didn't boot: \(error)"))
+            }
+        }
         return checks
     }
 
