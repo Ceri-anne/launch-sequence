@@ -2,7 +2,7 @@
 
 Fixes and improvements that came out of releasing Prime Time 1.2.0 (items 1–8) and Bigger or Smaller 1.1.0 (items 9–13) with launchseq. Each item names the problem we actually hit, then the change.
 
-Suggested order for what's left: **8 → 9 → 6 → 7**. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
+Suggested order for what's left: **9 → 6 → 7**. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
 
 ## 1. Wait longer for screenshot processing, with progress
 
@@ -66,7 +66,7 @@ Suggested order for what's left: **8 → 9 → 6 → 7**. PR 8 comes before 6 so
 
 ## 8. Replace only the screenshots that changed
 
-**Status:** partly released in 0.2.0. Liftoff now uploads screenshots one at a time and, on a rerun, keeps the ones at the start of a set that already match. `upload: manual` (or `--manual-screenshots`) lets you drag sets in by hand. Full per-image matching and `--skip-screenshots` are still to do.
+**Status:** done, not yet released. Uploading one at a time and `upload: manual` were released in 0.2.0. Now `syncScreenshots` matches each screenshot by file name and checksum wherever it is in the set, deletes the rest, uploads only the missing ones and then sets the order. Liftoff has `--skip-screenshots`, which warns that every locale keeps what App Store Connect already has. A set that only needed a deletion or a reorder says "removed or reordered, nothing to upload".
 
 **Problem:** `syncScreenshots` is all-or-nothing per set. If anything differs, it deletes the whole set and uploads every screenshot again, so adding one screenshot uploads four, and one failed image re-uploads the rest.
 

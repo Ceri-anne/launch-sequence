@@ -236,24 +236,20 @@ public struct AppStoreConnect: Sendable {
     }
 
     /// Makes the set for one localization × display type match `files` exactly, in order.
-    /// If it already matches (same file names and checksums, all processed), nothing changes.
+    /// Screenshots are matched one at a time: any already there with the same file name and
+    /// checksum, fully processed, is kept wherever it is. The rest are deleted, the missing
+    /// ones are uploaded, and then the set is put in the local order. If nothing differs,
+    /// nothing changes.
     public func syncScreenshots(localizationID: String, displayType: String, files: [LocalScreenshot], label: String? = nil) async throws -> ScreenshotResult {
         let label = label ?? displayType
         let sets = try await client.getAll("/v1/appStoreVersionLocalizations/\(localizationID)/appScreenshotSets")
         var setID = sets.first(where: { $0["attributes"]["screenshotDisplayType"].string == displayType })?["id"].string
-        var keptIDs: [String] = []
+        var plan = Self.matchScreenshots([], with: files)
         if let setID {
             let current = try await client.getAll("/v1/appScreenshotSets/\(setID)/appScreenshots")
-            // Keep the screenshots at the start that are already right, so a run that stopped
-            // partway carries on from where it got to. Everything after them is replaced.
-            let kept = zip(current, files).prefix { remote, local in
-                remote["attributes"]["fileName"].string == local.fileName
-                    && remote["attributes"]["sourceFileChecksum"].string?.lowercased() == local.md5
-                    && remote["attributes"]["assetDeliveryState"]["state"].string == "COMPLETE"
-            }.count
-            if kept == files.count && current.count == files.count { return .unchanged }
-            keptIDs = current.prefix(kept).compactMap { $0["id"].string }
-            for shot in current.dropFirst(kept) { if let id = shot["id"].string { try await client.delete("/v1/appScreenshots/\(id)") } }
+            plan = Self.matchScreenshots(current, with: files)
+            if plan.isUnchanged { return .unchanged }
+            for id in plan.delete { try await client.delete("/v1/appScreenshots/\(id)") }
         } else {
             let created = try await client.post("/v1/appScreenshotSets", [
                 "data": [
@@ -266,11 +262,15 @@ public struct AppStoreConnect: Sendable {
         }
         guard let setID else { throw LaunchError.api("No screenshot set ID for \(displayType)") }
 
-        // One at a time: each screenshot is uploaded and processed by Apple before the next starts.
-        var uploadedIDs = keptIDs
-        let toUpload = files.count - keptIDs.count
-        console.step("\(label): uploading \(toUpload) screenshot\(toUpload == 1 ? "" : "s") one at a time\(keptIDs.isEmpty ? "" : " (the first \(keptIDs.count) are already there)")")
-        for (n, file) in files.enumerated().dropFirst(keptIDs.count) {
+        // One at a time: each screenshot is uploaded and processed by Apple before the next
+        // starts. Only the ones uploaded now are waited for.
+        var order = plan.keep
+        let toUpload = order.filter { $0 == nil }.count
+        let kept = files.count - toUpload
+        if toUpload > 0 {
+            console.step("\(label): uploading \(toUpload) screenshot\(toUpload == 1 ? "" : "s") one at a time\(kept == 0 ? "" : " (\(kept) \(kept == 1 ? "is" : "are") already there)")")
+        }
+        for (n, file) in files.enumerated() where order[n] == nil {
             console.info("\(label): \(n + 1)/\(files.count) \(file.fileName)")
             let reserved = try await client.post("/v1/appScreenshots", [
                 "data": [
@@ -287,12 +287,40 @@ public struct AppStoreConnect: Sendable {
                 "data": ["type": "appScreenshots", "id": .string(shotID), "attributes": ["uploaded": true, "sourceFileChecksum": .string(file.md5)]],
             ])
             if !client.dryRun { try await waitForScreenshots([shotID], label: "\(label) \(file.fileName)") }
-            uploadedIDs.append(shotID)
+            order[n] = shotID
         }
         try await client.patch("/v1/appScreenshotSets/\(setID)/relationships/appScreenshots", [
-            "data": .array(uploadedIDs.map { ["type": "appScreenshots", "id": .string($0)] }),
+            "data": .array(order.compactMap { $0 }.map { ["type": "appScreenshots", "id": .string($0)] }),
         ])
         return .replaced(toUpload)
+    }
+
+    /// What to do with a set's screenshots so it matches `local`.
+    struct ScreenshotPlan: Equatable {
+        /// For each local file, the ID of the screenshot already there to keep, or nil to upload it.
+        var keep: [String?]
+        /// Screenshots to delete: changed, failed, still processing, duplicated or not in the local files.
+        var delete: [String]
+        /// The IDs currently in the set, in order.
+        var current: [String]
+        /// Every local file is already there, in the right order, with nothing extra.
+        var isUnchanged: Bool { delete.isEmpty && keep.allSatisfy { $0 != nil } && keep.compactMap { $0 } == current }
+    }
+
+    /// Matches each local file to a screenshot already in the set with the same file name and
+    /// checksum that Apple has finished processing. Position doesn't matter.
+    static func matchScreenshots(_ remote: [JSONValue], with local: [LocalScreenshot]) -> ScreenshotPlan {
+        var available = remote.filter { $0["attributes"]["assetDeliveryState"]["state"].string == "COMPLETE" }
+        let keep: [String?] = local.map { file in
+            guard let i = available.firstIndex(where: {
+                $0["attributes"]["fileName"].string == file.fileName
+                    && $0["attributes"]["sourceFileChecksum"].string?.lowercased() == file.md5
+            }) else { return nil }
+            return available.remove(at: i)["id"].string
+        }
+        let current = remote.compactMap { $0["id"].string }
+        let kept = Set(keep.compactMap { $0 })
+        return ScreenshotPlan(keep: keep, delete: current.filter { !kept.contains($0) }, current: current)
     }
 
     /// Apple has taken 10-15 minutes to process a set of screenshots, so this waits up to

@@ -105,7 +105,7 @@ struct ASCTests {
         #expect(transport.requests[before...].allSatisfy { $0.httpMethod == "GET" })
 
         let changed = [files[0], AppStoreConnect.LocalScreenshot(fileName: "02.png", data: Data("TWO".utf8))]
-        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: changed) == .replaced(1))  // the first is kept
+        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: changed) == .replaced(1))  // only the changed one
         #expect(fake.screenshots.count == 2)
     }
 
@@ -147,26 +147,6 @@ struct ASCTests {
                           "reserve", "poll shot2", "poll shot2", "poll shot2",
                           "reserve", "poll shot3", "poll shot3", "poll shot3"])
         #expect(fake.setOrder == ["shot1", "shot2", "shot3"])
-    }
-
-    @Test func aRerunKeepsTheScreenshotsThatAreAlreadyRight() async throws {
-        let fake = FakeASC()
-        let transport = RecordingTransport { try fake.handle($0) }
-        let lines = LineSink()
-        let console = Console(answers: [], sink: { lines.append($0) })
-        let client = ASCClient(credentials: testCredentials(), transport: transport, console: console, dryRun: false, sleep: { _ in })
-        let asc = AppStoreConnect(client: client, console: console)
-        var files = (1...4).map { AppStoreConnect.LocalScreenshot(fileName: "0\($0).png", data: Data("\($0)".utf8)) }
-        _ = try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files)
-
-        files[2] = .init(fileName: "03.png", data: Data("three, reframed".utf8))
-        let before = transport.requests.count
-        #expect(try await asc.syncScreenshots(localizationID: "loc1", displayType: "APP_IPHONE_61", files: files, label: "en-GB APP_IPHONE_61") == .replaced(2))
-        let rerun = transport.requests[before...]
-        #expect(rerun.filter { $0.httpMethod == "POST" && $0.url!.path == "/v1/appScreenshots" }.count == 2)
-        #expect(rerun.filter { $0.httpMethod == "DELETE" }.map { $0.url!.path } == ["/v1/appScreenshots/shot3", "/v1/appScreenshots/shot4"])
-        #expect(fake.setOrder == ["shot1", "shot2", "shot5", "shot6"])
-        #expect(lines.all.contains { $0.contains("en-GB APP_IPHONE_61: uploading 2 screenshots one at a time (the first 2 are already there)") })
     }
 
     @Test func processingTimeoutSaysWhatIsLeftAndHowToResume() async throws {

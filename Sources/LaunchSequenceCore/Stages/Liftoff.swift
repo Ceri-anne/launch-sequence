@@ -6,6 +6,8 @@ public struct Liftoff: Sendable {
     public struct Options: Sendable {
         public var force = false
         public var skipWebsite = false
+        /// Leave App Store Connect's screenshots as they are, e.g. on a rerun.
+        public var skipScreenshots = false
         /// Drag the screenshots into App Store Connect yourself, whatever the config says.
         public var manualScreenshots = false
         public init() {}
@@ -115,6 +117,9 @@ public struct Liftoff: Sendable {
         var shotSummary: [String]? = nil
         if config.screenshots == nil {
             console.step(Self.screenshotsSkipped)
+        } else if options.skipScreenshots {
+            console.warn(Self.screenshotsSkippedByFlag)
+            shotSummary = ["skipped (--skip-screenshots)"]
         } else {
             shotSummary = []
             let manual = options.manualScreenshots || config.screenshots?.upload == .manual
@@ -133,7 +138,7 @@ public struct Liftoff: Sendable {
                         : try await asc.syncScreenshots(localizationID: locID, displayType: group.displayType, files: locals, label: "\(locale) \(group.displayType)")
                     switch result {
                     case .unchanged: console.ok("\(locale) \(group.displayType): unchanged")
-                    case .replaced(let n): console.done("\(locale) \(group.displayType): \(manual ? "your \(n) match the local files" : "uploaded \(n)")", dryRun: ctx.dryRun)
+                    case .replaced(let n): console.done("\(locale) \(group.displayType): \(manual ? "your \(n) match the local files" : n == 0 ? "removed or reordered, nothing to upload" : "uploaded \(n)")", dryRun: ctx.dryRun)
                     }
                     shotSummary?.append("\(locale) \(group.displayType): \(locals.count)")
                 }
@@ -164,6 +169,7 @@ public struct Liftoff: Sendable {
         summary(build: buildNumber, locales: metadata.map(\.locale), screenshots: shotSummary, appID: appID).forEach(console.info)
     }
 
+    static let screenshotsSkippedByFlag = "Screenshots: skipped (--skip-screenshots). Every locale keeps whatever screenshots App Store Connect already has."
     static let screenshotsSkipped = "Screenshots: skipped (no screenshots: section in .launchseq.yml; App Store Connect keeps the previous version's)"
 
     /// The "Ready for review" lines. `screenshots` is nil when the config doesn't manage them.
