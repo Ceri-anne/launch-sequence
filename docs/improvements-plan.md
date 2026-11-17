@@ -2,7 +2,7 @@
 
 Fixes and improvements that came out of releasing Prime Time 1.2.0 (items 1–8) and Bigger or Smaller 1.1.0 (items 9–13) with launchseq. Each item names the problem we actually hit, then the change.
 
-Suggested order for what's left: **11 → 5 → 8 → 9 → 6 → 7**. 11 reuses item 10's blank check. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
+Suggested order for what's left: **5 → 8 → 9 → 6 → 7**. PR 8 comes before 6 so PR 6 can reuse its per-image matching. Every PR adds tests using the existing `FakeASC` and `LineSink` fakes.
 
 ## 1. Wait longer for screenshot processing, with progress
 
@@ -114,6 +114,8 @@ Suggested order for what's left: **11 → 5 → 8 → 9 → 6 → 7**. 11 reuses
   - A blank capture is retried, and capturing fails after the last retry.
 
 ## 11. Doctor: take one real capture
+
+**Status:** done, not yet released. Doctor boots the first iOS screenshot device, opens Settings, waits 3 seconds and runs item 10's blank check on one capture. It's skipped in a dry run, and `doctor --skip-capture` turns it off.
 
 **Problem:** `simctl io screenshot` run from a sandboxed shell (an agent's sandbox, for one) returns a correctly sized but blank frame for every app, system apps included, with no error. It took a while to tell that apart from item 10.
 

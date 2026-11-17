@@ -128,8 +128,11 @@ struct DoctorCommand: AsyncParsableCommand {
     @Flag(help: "Don't contact App Store Connect.")
     var offline = false
 
+    @Flag(help: "Don't boot a simulator to check that screen capture works.")
+    var skipCapture = false
+
     func run() async throws {
-        let checks = await Doctor(ctx: try global.context()).run(checkASC: !offline)
+        let checks = await Doctor(ctx: try global.context()).run(checkASC: !offline, checkCapture: !skipCapture)
         if checks.contains(where: { $0.level == .fail }) { throw ExitCode(1) }
     }
 }
